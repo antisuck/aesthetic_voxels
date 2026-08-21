@@ -1,353 +1,365 @@
-if game.ReplicatedStorage:FindFirstChild("Systems") then
-workspace.FallenPartsDestroyHeight = 0/0
-game:GetService("ReplicatedStorage").Client.Events.LocalNotification:Fire("our discord channel - https://discord.gg/SZbHupR7W")
 
---==============================================================
--- VOXEL COMBAT
--- Rayfield + Mobile ESP + Kill Aura + Mobile Fly
---==============================================================
 
 --==============================================================
 -- SERVICES
 --==============================================================
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local Players         = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
-local Workspace = game:GetService("Workspace")
+local RunService      = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService     = game:GetService("HttpService")
+local TweenService    = game:GetService("TweenService")
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
+local LocalPlayer     = Players.LocalPlayer
+local Camera          = workspace.CurrentCamera
 
+--==============================================================
+-- REMOTE PATHS
+--==============================================================
+
+local AttackRemote = ReplicatedStorage
+    :WaitForChild("Systems")
+    :WaitForChild("ActionsSystem")
+    :WaitForChild("Network")
+    :WaitForChild("Attack")
+
+local FallRemote = ReplicatedStorage
+    :WaitForChild("Systems")
+    :WaitForChild("CombatSystem")
+    :WaitForChild("Network")
+    :WaitForChild("FallDamage")
+
+--==============================================================
+-- STATE
+--==============================================================
+
+local State = {
+    -- Visuals
+    ESPEnabled     = false,
+    ESPColor       = Color3.fromHex("960000"),
+    FOVEnabled     = false,
+    FOVColor       = Color3.fromHex("FFFFFF"),
+    FOVRainbow     = false,
+    FOVSize        = 120,
+
+    -- Rage
+    KillAura       = false,
+    KillAuraRange  = 24,
+    AttackDelay    = 0.35,
+    AimbotEnabled  = false,
+
+    -- Misc
+    NoFallDamage   = false,
+    NoDrowDamage   = false,
+    FlyEnabled     = false,
+    JumpPower      = 50,
+    Speed          = 16,
+
+    -- Internal
+    FlyBodyVelocity = nil,
+    FlyBodyGyro    = nil,
+    OldNamecall    = nil,
+}
 
 --==============================================================
 -- RAYFIELD
 --==============================================================
 
-local Rayfield = loadstring(
-    game:HttpGet("https://sirius.menu/rayfield")
-)()
+local Rayfield = loadstring(game:HttpGet(
+    "https://sirius.menu/rayfield"
+))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "aesthetic",
-
-    LoadingTitle = "voxels game script",
-    LoadingSubtitle = "Mobile Combat Menu",
-
+    Name             = "aesthetic",
+    LoadingTitle     = "aesthetic",
+    LoadingSubtitle  = "v1.1.0",
     ConfigurationSaving = {
-        Enabled = false
+        Enabled  = true,
+        FolderName = "aesthetic",
+        FileName = "config"
     },
-
     Discord = {
-        Enabled = false
+        Enabled     = false,
+        Invite      = "",
+        RememberJoined = false
     },
-
     KeySystem = false
 })
-
 
 --==============================================================
 -- TABS
 --==============================================================
 
-local VisualsTab = Window:CreateTab("Visuals", 4483362458)
-local KillAuraTab = Window:CreateTab("Kill Aura", 4483362458)
-local MiskTab = Window:CreateTab("Misk", 4483362458)
-local ConfigTab = Window:CreateTab("Config", 4483362458)
-local SettingsTab = Window:CreateTab("Settings UI", 4483362458)
-
-
---==============================================================
--- SETTINGS
---==============================================================
-
-local Settings = {
-
-    -- ESP
-    ESPEnabled = true,
-
-    BoxESP = true,
-    SkeletonESP = false,
-    HealthBar = true,
-    HealthText = true,
-    NameESP = true,
-    DistanceESP = true,
-
-    ESPColor = Color3.fromRGB(
-        255,
-        255,
-        255
-    ),
-
-    TargetHighlight = true,
-
-    TargetHighlightColor =
-        Color3.fromRGB(
-            255,
-            80,
-            80
-        ),
-
-    -- KILL AURA
-    KillAura = false,
-
-    KillAuraRange = 24,
-
-    ShowFOV = true,
-
-    FOVRadius = 100,
-
-    FOVColor =
-        Color3.fromRGB(
-            255,
-            80,
-            80
-        ),
-
-    KillAuraDelay = 0.35,
-
-    -- MOVEMENT
-    Fly = false,
-
-    FlySpeed = 50,
-
-    Speed = 16,
-
-    JumpPower = 50,
-
-    Noclip = false,
-
-    -- CONFIG
-    CurrentConfig = "default",
-
-    AutoLoadConfig = false
-}
-
+local TabVisuals    = Window:CreateTab("Visuals",   "eye")
+local TabRage       = Window:CreateTab("Rage",      "sword")
+local TabMisc       = Window:CreateTab("Misc",      "settings")
+local TabCrosshair  = Window:CreateTab("Crosshair", "crosshair")
+local TabConfig     = Window:CreateTab("Config",    "save")
+local TabAbout      = Window:CreateTab("About",     "info")
 
 --==============================================================
--- CONFIG SYSTEM
+-- HELPERS
 --==============================================================
 
-local ConfigFolder = "VoxelCombat"
-
-local function EnsureConfigFolder()
-
-    if not isfolder or not makefolder then
-        return
-    end
-
-    if not isfolder(ConfigFolder) then
-
-        pcall(function()
-            makefolder(ConfigFolder)
-        end)
-
-    end
+local function getRoot(character)
+    if not character then return nil end
+    return character:FindFirstChild("HumanoidRootPart")
+        or character.PrimaryPart
 end
 
-
-EnsureConfigFolder()
-
-
-local function ConfigPath(name)
-
-    return ConfigFolder ..
-        "/" ..
-        name ..
-        ".json"
-
+local function getHumanoid(character)
+    if not character then return nil end
+    return character:FindFirstChildOfClass("Humanoid")
 end
 
+local function getNearestTarget()
+    local myChar = LocalPlayer.Character
+    local myRoot = getRoot(myChar)
+    if not myRoot then return nil end
 
-local function SerializeSettings()
+    local nearest, nearestDist = nil, State.KillAuraRange
 
-    local data = {}
-
-    for key, value in pairs(Settings) do
-
-        if typeof(value) == "Color3" then
-
-            data[key] = {
-                R = value.R,
-                G = value.G,
-                B = value.B
-            }
-
-        else
-
-            data[key] = value
-
-        end
-    end
-
-    return data
-end
-
-
-local function ApplySettings(data)
-
-    if type(data) ~= "table" then
-        return
-    end
-
-    for key, value in pairs(data) do
-
-        if Settings[key] ~= nil then
-
-            if type(value) == "table"
-                and value.R
-                and value.G
-                and value.B then
-
-                Settings[key] = Color3.new(
-                    value.R,
-                    value.G,
-                    value.B
-                )
-
-            else
-
-                Settings[key] = value
-
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local char = p.Character
+            local root = getRoot(char)
+            local hum  = getHumanoid(char)
+            if root and hum and hum.Health > 0 then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist <= nearestDist then
+                    nearest     = char
+                    nearestDist = dist
+                end
             end
         end
     end
+
+    return nearest
 end
 
+local function getAimbotTarget()
+    local myChar = LocalPlayer.Character
+    local myRoot = getRoot(myChar)
+    if not myRoot then return nil end
 
-local function SaveConfig(name)
+    local nearest, nearestDist = nil, State.FOVSize
 
-    if not writefile then
-        return false
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local char = p.Character
+            local root = getRoot(char)
+            local hum  = getHumanoid(char)
+            if root and hum and hum.Health > 0 then
+                local screenPos, onScreen =
+                    Camera:WorldToViewportPoint(root.Position)
+                if onScreen then
+                    local center = Vector2.new(
+                        Camera.ViewportSize.X / 2,
+                        Camera.ViewportSize.Y / 2
+                    )
+                    local dist2d = (
+                        Vector2.new(screenPos.X, screenPos.Y) - center
+                    ).Magnitude
+                    if dist2d <= nearestDist then
+                        nearest     = char
+                        nearestDist = dist2d
+                    end
+                end
+            end
+        end
     end
 
-    EnsureConfigFolder()
-
-    local success = pcall(function()
-
-        local data =
-            HttpService:JSONEncode(
-                SerializeSettings()
-            )
-
-        writefile(
-            ConfigPath(name),
-            data
-        )
-
-    end)
-
-    return success
+    return nearest
 end
-
-
-local function LoadConfig(name)
-
-    if not readfile or not isfile then
-        return false
-    end
-
-    local path =
-        ConfigPath(name)
-
-    if not isfile(path) then
-        return false
-    end
-
-    local success = pcall(function()
-
-        local data =
-            readfile(path)
-
-        local decoded =
-            HttpService:JSONDecode(data)
-
-        ApplySettings(decoded)
-
-    end)
-
-    return success
-end
-
-
-local function DeleteConfig(name)
-
-    if not delfile or not isfile then
-        return false
-    end
-
-    local path =
-        ConfigPath(name)
-
-    if not isfile(path) then
-        return false
-    end
-
-    local success = pcall(function()
-
-        delfile(path)
-
-    end)
-
-    return success
-end
-
-
-local function ConfigExists(name)
-
-    if not isfile then
-        return false
-    end
-
-    return isfile(
-        ConfigPath(name)
-    )
-end
-
 
 --==============================================================
 -- ESP
 --==============================================================
 
+--==============================================================
+-- HYBRID ESP
+-- Character Parts Bounding Box
+-- Fallback: LastPosition
+--==============================================================
+
 local ESPObjects = {}
 
+local ESPSettings = {
+    MaxDistance = 2500,
 
-local function NewDrawing(class)
+    BoxColor = State.ESPColor,
+    TextColor = Color3.fromRGB(255, 255, 255),
 
-    local object =
-        Drawing.new(class)
+    BoxThickness = 2,
 
-    if class == "Square" then
+    -- Плавность позиции ESP
+    Smoothness = 0.25,
 
-        object.Visible = false
-        object.Filled = false
-        object.Thickness = 1.5
+    -- Сколько времени терпим временную потерю Character
+    GraceTime = 0.15,
+}
 
-    elseif class == "Line" then
+--==============================================================
+-- ESP FOLDER
+--==============================================================
 
-        object.Visible = false
-        object.Thickness = 1.5
+local ESPFolder =
+    workspace:FindFirstChild("HybridESP")
+    or Instance.new("Folder")
 
-    elseif class == "Text" then
+ESPFolder.Name = "HybridESP"
+ESPFolder.Parent = workspace
 
-        object.Visible = false
-        object.Center = true
-        object.Outline = true
-        object.Size = 13
+--==============================================================
+-- HEALTH COLOR
+--==============================================================
 
+local function getESPHealthColor(percent)
+
+    if percent > 0.60 then
+        return Color3.fromRGB(60, 255, 110)
+
+    elseif percent > 0.30 then
+        return Color3.fromRGB(255, 220, 60)
+
+    else
+        return Color3.fromRGB(255, 60, 60)
     end
-
-    return object
 end
 
+--==============================================================
+-- GET CHARACTER PARTS
+--==============================================================
+
+local function getCharacterParts(character)
+
+    if not character then
+        return {}
+    end
+
+    local parts = {}
+
+    for _, obj in ipairs(character:GetDescendants()) do
+
+        if obj:IsA("BasePart")
+            and obj.Transparency < 1 then
+
+            table.insert(parts, obj)
+
+        end
+    end
+
+    return parts
+end
+
+--==============================================================
+-- GET SCREEN BOUNDING BOX
+--==============================================================
+
+local function getHybridBoundingBox(character)
+
+    local parts = getCharacterParts(character)
+
+    if #parts == 0 then
+        return nil
+    end
+
+    local minX = math.huge
+    local minY = math.huge
+
+    local maxX = -math.huge
+    local maxY = -math.huge
+
+    local visiblePoints = 0
+
+    for _, part in ipairs(parts) do
+
+        local cf = part.CFrame
+        local size = part.Size / 2
+
+        -- Все 8 углов BasePart
+        local corners = {
+            Vector3.new(-size.X, -size.Y, -size.Z),
+            Vector3.new(-size.X, -size.Y,  size.Z),
+            Vector3.new(-size.X,  size.Y, -size.Z),
+            Vector3.new(-size.X,  size.Y,  size.Z),
+
+            Vector3.new( size.X, -size.Y, -size.Z),
+            Vector3.new( size.X, -size.Y,  size.Z),
+            Vector3.new( size.X,  size.Y, -size.Z),
+            Vector3.new( size.X,  size.Y,  size.Z),
+        }
+
+        for _, corner in ipairs(corners) do
+
+            local worldPosition =
+                cf:PointToWorldSpace(corner)
+
+            local screenPosition, onScreen =
+                Camera:WorldToViewportPoint(
+                    worldPosition
+                )
+
+            if onScreen and screenPosition.Z > 0 then
+
+                visiblePoints += 1
+
+                minX = math.min(
+                    minX,
+                    screenPosition.X
+                )
+
+                minY = math.min(
+                    minY,
+                    screenPosition.Y
+                )
+
+                maxX = math.max(
+                    maxX,
+                    screenPosition.X
+                )
+
+                maxY = math.max(
+                    maxY,
+                    screenPosition.Y
+                )
+            end
+        end
+    end
+
+    if visiblePoints < 2 then
+        return nil
+    end
+
+    local width =
+        maxX - minX
+
+    local height =
+        maxY - minY
+
+    -- Защита от кривых/нулевых размеров
+    if width < 2 or height < 2 then
+        return nil
+    end
+
+    return {
+        X = minX,
+        Y = minY,
+
+        Width = width,
+        Height = height,
+
+        CenterX = (minX + maxX) / 2,
+        CenterY = (minY + maxY) / 2,
+    }
+end
 
 --==============================================================
 -- CREATE ESP
 --==============================================================
 
-local function CreateESP(player)
+local function createESP(player)
 
     if player == LocalPlayer then
         return
@@ -357,2807 +369,2466 @@ local function CreateESP(player)
         return
     end
 
-
-    local esp = {
-
-        Player = player,
-
-        Box = NewDrawing("Square"),
-
-        HealthBackground =
-            NewDrawing("Square"),
-
-        HealthBar =
-            NewDrawing("Square"),
-
-        Name =
-            NewDrawing("Text"),
-
-        Distance =
-            NewDrawing("Text"),
-
-        HealthText =
-            NewDrawing("Text"),
-
-        Skeleton = {},
-
-        Highlight = nil,
-
-        Connections = {}
-    }
-
-
-    for i = 1, 15 do
-
-        esp.Skeleton[i] =
-            NewDrawing("Line")
-
-    end
-
-
-    ESPObjects[player] = esp
-
-end
-
-
---==============================================================
--- HIDE ESP
---==============================================================
-
-local function HideESP(esp)
-
-    if not esp then
-        return
-    end
-
-    esp.Box.Visible = false
-
-    esp.HealthBackground.Visible = false
-    esp.HealthBar.Visible = false
-
-    esp.Name.Visible = false
-    esp.Distance.Visible = false
-    esp.HealthText.Visible = false
-
-    for _, line in pairs(
-        esp.Skeleton
-    ) do
-
-        line.Visible = false
-
-    end
-
-end
-
-
---==============================================================
--- REMOVE ESP
---==============================================================
-
-local function RemoveESP(player)
-
-    local esp =
-        ESPObjects[player]
-
-    if not esp then
-        return
-    end
-
-
-    for _, connection in pairs(
-        esp.Connections
-    ) do
-
-        pcall(function()
-            connection:Disconnect()
-        end)
-
-    end
-
-
-    for _, object in pairs(esp) do
-
-        if typeof(object) == "userdata" then
-
-            pcall(function()
-
-                object.Visible = false
-                object:Remove()
-
-            end)
-
-        elseif type(object) == "table" then
-
-            for _, drawing in pairs(object) do
-
-                pcall(function()
-
-                    drawing.Visible = false
-                    drawing:Remove()
-
-                end)
-
-            end
-        end
-    end
-
-
-    if esp.Highlight then
-
-        pcall(function()
-            esp.Highlight:Destroy()
-        end)
-
-    end
-
-
-    ESPObjects[player] = nil
-
-end
-
-
---==============================================================
--- PLAYER SETUP
---==============================================================
-
-local function SetupPlayer(player)
-
-    if player == LocalPlayer then
-        return
-    end
-
-
-    CreateESP(player)
-
-    local esp =
-        ESPObjects[player]
-
-    if not esp then
-        return
-    end
-
-
     --==========================================================
-    -- CHARACTER ADDED
+    -- INVISIBLE POSITION PART
+    -- Used for LastPosition fallback
     --==========================================================
 
-    esp.Connections.CharacterAdded =
-        player.CharacterAdded:Connect(
-            function(character)
+    local part = Instance.new("Part")
 
-                HideESP(esp)
+    part.Name =
+        player.Name .. "_HybridESP"
 
+    part.Size =
+        Vector3.new(2, 5, 1)
 
-                if esp.Highlight then
+    part.Transparency = 1
 
-                    pcall(function()
-                        esp.Highlight:Destroy()
-                    end)
+    part.Anchored = true
 
-                    esp.Highlight = nil
+    part.CanCollide = false
+    part.CanTouch = false
+    part.CanQuery = false
 
-                end
+    part.CastShadow = false
 
+    part.Position =
+        Vector3.new(0, -9999, 0)
 
-                task.wait(0.15)
-
-                -- ESP object remains alive.
-                -- UpdateESP automatically uses the new character.
-
-            end
-        )
-
+    part.Parent = ESPFolder
 
     --==========================================================
-    -- CHARACTER REMOVING
+    -- BILLBOARD
     --==========================================================
 
-    esp.Connections.CharacterRemoving =
-        player.CharacterRemoving:Connect(
-            function()
+    local gui =
+        Instance.new("BillboardGui")
 
-                HideESP(esp)
+    gui.Name = "ESP"
 
+    gui.AlwaysOnTop = true
+    gui.LightInfluence = 0
 
-                if esp.Highlight then
+    gui.Size =
+        UDim2.fromOffset(150, 150)
 
-                    pcall(function()
-                        esp.Highlight:Destroy()
-                    end)
+    gui.StudsOffsetWorldSpace =
+        Vector3.new(0, 2.8, 0)
 
-                    esp.Highlight = nil
+    gui.Enabled = false
 
-                end
-
-            end
-        )
-
-end
-
-
-for _, player in ipairs(
-    Players:GetPlayers()
-) do
-
-    SetupPlayer(player)
-
-end
-
-
-Players.PlayerAdded:Connect(
-    function(player)
-
-        SetupPlayer(player)
-
-    end
-)
-
-
-Players.PlayerRemoving:Connect(
-    function(player)
-
-        RemoveESP(player)
-
-    end
-)
-
-
---==============================================================
--- GET BOUNDING BOX
---==============================================================
-
-local function GetBoundingBox(character)
-
-    local minX = math.huge
-    local minY = math.huge
-
-    local maxX = -math.huge
-    local maxY = -math.huge
-
-    local found = false
-
-
-    for _, part in ipairs(
-        character:GetChildren()
-    ) do
-
-        if part:IsA("BasePart") then
-
-            local cf =
-                part.CFrame
-
-            local half =
-                part.Size / 2
-
-
-            local corners = {
-
-                cf * Vector3.new(
-                    -half.X,
-                    -half.Y,
-                    -half.Z
-                ),
-
-                cf * Vector3.new(
-                    -half.X,
-                    -half.Y,
-                    half.Z
-                ),
-
-                cf * Vector3.new(
-                    -half.X,
-                    half.Y,
-                    -half.Z
-                ),
-
-                cf * Vector3.new(
-                    -half.X,
-                    half.Y,
-                    half.Z
-                ),
-
-                cf * Vector3.new(
-                    half.X,
-                    -half.Y,
-                    -half.Z
-                ),
-
-                cf * Vector3.new(
-                    half.X,
-                    -half.Y,
-                    half.Z
-                ),
-
-                cf * Vector3.new(
-                    half.X,
-                    half.Y,
-                    -half.Z
-                ),
-
-                cf * Vector3.new(
-                    half.X,
-                    half.Y,
-                    half.Z
-                )
-            }
-
-
-            for _, position in ipairs(
-                corners
-            ) do
-
-                local screen, visible =
-                    Camera:WorldToViewportPoint(
-                        position
-                    )
-
-
-                if visible
-                    and screen.Z > 0 then
-
-                    found = true
-
-                    minX =
-                        math.min(
-                            minX,
-                            screen.X
-                        )
-
-                    minY =
-                        math.min(
-                            minY,
-                            screen.Y
-                        )
-
-                    maxX =
-                        math.max(
-                            maxX,
-                            screen.X
-                        )
-
-                    maxY =
-                        math.max(
-                            maxY,
-                            screen.Y
-                        )
-
-                end
-            end
-        end
-    end
-
-
-    if not found then
-        return nil
-    end
-
-
-    return {
-
-        X = minX,
-
-        Y = minY,
-
-        Width =
-            maxX - minX,
-
-        Height =
-            maxY - minY
-    }
-
-end
-
-
---==============================================================
--- SKELETON
---==============================================================
-
-local SkeletonConnections = {
-
-    {"Head", "UpperTorso"},
-
-    {"UpperTorso", "LowerTorso"},
-
-    {"UpperTorso", "LeftUpperArm"},
-    {"LeftUpperArm", "LeftLowerArm"},
-    {"LeftLowerArm", "LeftHand"},
-
-    {"UpperTorso", "RightUpperArm"},
-    {"RightUpperArm", "RightLowerArm"},
-    {"RightLowerArm", "RightHand"},
-
-    {"LowerTorso", "LeftUpperLeg"},
-    {"LeftUpperLeg", "LeftLowerLeg"},
-    {"LeftLowerLeg", "LeftFoot"},
-
-    {"LowerTorso", "RightUpperLeg"},
-    {"RightUpperLeg", "RightLowerLeg"},
-    {"RightLowerLeg", "RightFoot"}
-}
-
-
-local function GetBodyPart(character, name)
-
-    return character:FindFirstChild(
-        name
-    )
-
-end
-
-
---==============================================================
--- HIGHLIGHT
---==============================================================
-
-local function UpdateHighlight(
-    player,
-    character,
-    alive
-)
-
-    local esp =
-        ESPObjects[player]
-
-    if not esp then
-        return
-    end
-
-
-    if not Settings.TargetHighlight
-        or not alive then
-
-        if esp.Highlight then
-
-            pcall(function()
-                esp.Highlight:Destroy()
-            end)
-
-            esp.Highlight = nil
-
-        end
-
-        return
-    end
-
-
-    if not esp.Highlight then
-
-        local highlight =
-            Instance.new("Highlight")
-
-
-        highlight.Name =
-            "VoxelCombatHighlight"
-
-        highlight.DepthMode =
-            Enum.HighlightDepthMode.AlwaysOnTop
-
-        highlight.FillTransparency =
-            0.65
-
-        highlight.OutlineTransparency =
-            0
-
-        highlight.Parent =
-            character
-
-        esp.Highlight =
-            highlight
-
-    end
-
-
-    esp.Highlight.Adornee =
-        character
-
-    esp.Highlight.FillColor =
-        Settings.TargetHighlightColor
-
-    esp.Highlight.OutlineColor =
-        Settings.TargetHighlightColor
-
-end
-
-
---==============================================================
--- UPDATE ESP
---==============================================================
-
-local function UpdateESP(player, esp)
-
-    if not Settings.ESPEnabled then
-
-        HideESP(esp)
-
-        return
-    end
-
-
-    local character =
-        player.Character
-
-
-    if not character then
-
-        HideESP(esp)
-
-        return
-    end
-
-
-    local humanoid =
-        character:FindFirstChildOfClass(
-            "Humanoid"
-        )
-
-
-    local root =
-        character:FindFirstChild(
-            "HumanoidRootPart"
-        )
-        or character.PrimaryPart
-
-
-    if not humanoid
-        or not root
-        or humanoid.Health <= 0 then
-
-        HideESP(esp)
-
-        UpdateHighlight(
-            player,
-            character,
-            false
-        )
-
-        return
-    end
-
-
-    local bounds =
-        GetBoundingBox(character)
-
-
-    if not bounds then
-
-        HideESP(esp)
-
-        return
-    end
-
-
-    local color =
-        Settings.ESPColor
-
+    gui.Parent = part
 
     --==========================================================
-    -- BOX
+    -- CONTAINER
     --==========================================================
 
-    if Settings.BoxESP then
+    local container =
+        Instance.new("Frame")
 
-        esp.Box.Visible = true
+    container.Name = "Container"
 
-        esp.Box.Position =
-            Vector2.new(
-                bounds.X,
-                bounds.Y
-            )
+    container.Size =
+        UDim2.fromScale(1, 1)
 
-        esp.Box.Size =
-            Vector2.new(
-                bounds.Width,
-                bounds.Height
-            )
+    container.BackgroundTransparency = 1
 
-        esp.Box.Color =
-            color
-
-    else
-
-        esp.Box.Visible = false
-
-    end
-
-
-    --==========================================================
-    -- HEALTH BAR
-    --==========================================================
-
-    if Settings.HealthBar then
-
-        local health =
-            math.clamp(
-                humanoid.Health /
-                math.max(
-                    humanoid.MaxHealth,
-                    1
-                ),
-                0,
-                1
-            )
-
-
-        local x =
-            bounds.X - 6
-
-
-        esp.HealthBackground.Visible =
-            true
-
-        esp.HealthBackground.Position =
-            Vector2.new(
-                x,
-                bounds.Y
-            )
-
-        esp.HealthBackground.Size =
-            Vector2.new(
-                3,
-                bounds.Height
-            )
-
-        esp.HealthBackground.Color =
-            Color3.fromRGB(
-                40,
-                40,
-                40
-            )
-
-
-        esp.HealthBar.Visible =
-            true
-
-        esp.HealthBar.Position =
-            Vector2.new(
-                x,
-                bounds.Y +
-                bounds.Height -
-                bounds.Height * health
-            )
-
-        esp.HealthBar.Size =
-            Vector2.new(
-                3,
-                bounds.Height * health
-            )
-
-
-        esp.HealthBar.Color =
-            Color3.fromRGB(
-                math.floor(
-                    255 * (1 - health)
-                ),
-
-                math.floor(
-                    255 * health
-                ),
-
-                60
-            )
-
-    else
-
-        esp.HealthBackground.Visible =
-            false
-
-        esp.HealthBar.Visible =
-            false
-
-    end
-
+    container.Parent = gui
 
     --==========================================================
     -- NAME
     --==========================================================
 
-    if Settings.NameESP then
+    local nameText =
+        Instance.new("TextLabel")
 
-        esp.Name.Visible = true
+    nameText.Name = "Name"
 
-        esp.Name.Text =
-            player.DisplayName
+    nameText.AnchorPoint =
+        Vector2.new(0.5, 0)
 
-        esp.Name.Position =
-            Vector2.new(
-                bounds.X +
-                bounds.Width / 2,
+    nameText.Position =
+        UDim2.new(
+            0.5,
+            0,
+            0,
+            0
+        )
 
-                bounds.Y - 16
-            )
+    nameText.Size =
+        UDim2.new(
+            1,
+            0,
+            0,
+            18
+        )
 
-        esp.Name.Color =
-            color
+    nameText.BackgroundTransparency = 1
 
-    else
+    nameText.TextColor3 =
+        ESPSettings.TextColor
 
-        esp.Name.Visible = false
+    nameText.TextStrokeColor3 =
+        Color3.new(0, 0, 0)
 
-    end
+    nameText.TextStrokeTransparency = 0
 
+    nameText.Font =
+        Enum.Font.GothamBold
+
+    nameText.TextSize = 13
+
+    nameText.Text =
+        player.DisplayName
+
+    nameText.Parent = container
+
+    --==========================================================
+    -- BOX
+    --==========================================================
+
+    local box =
+        Instance.new("Frame")
+
+    box.Name = "Box"
+
+    box.AnchorPoint =
+        Vector2.new(0.5, 0)
+
+    box.Position =
+        UDim2.new(
+            0.5,
+            0,
+            0,
+            27
+        )
+
+    box.Size =
+        UDim2.fromOffset(
+            42,
+            70
+        )
+
+    box.BackgroundTransparency = 1
+
+    box.BorderSizePixel = 0
+
+    box.Parent = container
+
+    local boxStroke =
+        Instance.new("UIStroke")
+
+    boxStroke.Name = "Stroke"
+
+    boxStroke.Thickness =
+        ESPSettings.BoxThickness
+
+    boxStroke.Color =
+        State.ESPColor
+
+    boxStroke.Parent = box
+
+    --==========================================================
+    -- HEALTH BACKGROUND
+    --==========================================================
+
+    local healthBackground =
+        Instance.new("Frame")
+
+    healthBackground.Name =
+        "HealthBackground"
+
+    healthBackground.Position =
+        UDim2.new(
+            0.5,
+            -29,
+            0,
+            27
+        )
+
+    healthBackground.Size =
+        UDim2.fromOffset(
+            4,
+            70
+        )
+
+    healthBackground.BackgroundColor3 =
+        Color3.fromRGB(
+            20,
+            20,
+            20
+        )
+
+    healthBackground.BackgroundTransparency =
+        0.15
+
+    healthBackground.BorderSizePixel = 0
+
+    healthBackground.Parent =
+        container
+
+    --==========================================================
+    -- HEALTH BAR
+    --==========================================================
+
+    local healthBar =
+        Instance.new("Frame")
+
+    healthBar.Name =
+        "HealthBar"
+
+    healthBar.AnchorPoint =
+        Vector2.new(0, 1)
+
+    healthBar.Position =
+        UDim2.new(
+            0,
+            0,
+            1,
+            0
+        )
+
+    healthBar.Size =
+        UDim2.new(
+            1,
+            0,
+            1,
+            0
+        )
+
+    healthBar.BackgroundColor3 =
+        Color3.fromRGB(
+            60,
+            255,
+            110
+        )
+
+    healthBar.BorderSizePixel = 0
+
+    healthBar.Parent =
+        healthBackground
+
+    --==========================================================
+    -- HP TEXT
+    --==========================================================
+
+    local hpText =
+        Instance.new("TextLabel")
+
+    hpText.Name =
+        "HealthText"
+
+    hpText.Position =
+        UDim2.new(
+            0.5,
+            32,
+            0,
+            27
+        )
+
+    hpText.Size =
+        UDim2.fromOffset(
+            70,
+            18
+        )
+
+    hpText.BackgroundTransparency = 1
+
+    hpText.TextColor3 =
+        Color3.fromRGB(
+            60,
+            255,
+            110
+        )
+
+    hpText.TextStrokeColor3 =
+        Color3.new(0, 0, 0)
+
+    hpText.TextStrokeTransparency = 0
+
+    hpText.Font =
+        Enum.Font.GothamBold
+
+    hpText.TextSize = 11
+
+    hpText.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    hpText.Text =
+        "? HP"
+
+    hpText.Parent =
+        container
 
     --==========================================================
     -- DISTANCE
     --==========================================================
 
-    if Settings.DistanceESP then
+    local distanceText =
+        Instance.new("TextLabel")
 
-        local myCharacter =
-            LocalPlayer.Character
+    distanceText.Name =
+        "Distance"
 
+    distanceText.AnchorPoint =
+        Vector2.new(0.5, 0)
 
-        local myRoot =
-            myCharacter
-            and (
-                myCharacter:FindFirstChild(
-                    "HumanoidRootPart"
-                )
-                or myCharacter.PrimaryPart
-            )
+    distanceText.Position =
+        UDim2.new(
+            0.5,
+            0,
+            0,
+            103
+        )
 
+    distanceText.Size =
+        UDim2.new(
+            1,
+            0,
+            0,
+            18
+        )
 
-        if myRoot then
+    distanceText.BackgroundTransparency = 1
 
-            local distance =
-                (
-                    root.Position -
-                    myRoot.Position
-                ).Magnitude
+    distanceText.TextColor3 =
+        Color3.fromRGB(
+            200,
+            200,
+            200
+        )
 
+    distanceText.TextStrokeColor3 =
+        Color3.new(0, 0, 0)
 
-            esp.Distance.Visible =
-                true
+    distanceText.TextStrokeTransparency = 0
 
-            esp.Distance.Text =
-                string.format(
-                    "[%dm]",
-                    math.floor(distance)
-                )
+    distanceText.Font =
+        Enum.Font.Gotham
 
-            esp.Distance.Position =
-                Vector2.new(
-                    bounds.X +
-                    bounds.Width / 2,
+    distanceText.TextSize = 11
 
-                    bounds.Y +
-                    bounds.Height +
-                    2
-                )
+    distanceText.Text =
+        "? Stud"
 
-            esp.Distance.Color =
-                color
+    distanceText.Parent =
+        container
 
-        else
+    --==========================================================
+    -- STORE
+    --==========================================================
 
-            esp.Distance.Visible =
-                false
+    ESPObjects[player] = {
 
-        end
+        Part = part,
 
-    else
+        Gui = gui,
 
-        esp.Distance.Visible =
-            false
+        NameText = nameText,
 
+        Box = box,
+
+        BoxStroke = boxStroke,
+
+        HealthBackground =
+            healthBackground,
+
+        HealthBar =
+            healthBar,
+
+        HealthText =
+            hpText,
+
+        DistanceText =
+            distanceText,
+
+        LastPos = nil,
+
+        LastValidTime = 0,
+
+        Mode = "None",
+
+        Tween = nil,
+    }
+end
+
+--==============================================================
+-- HIDE ESP
+--==============================================================
+
+local function hideESP(esp)
+
+    if not esp then
+        return
     end
 
-
-    --==========================================================
-    -- HEALTH TEXT
-    --==========================================================
-
-    if Settings.HealthText then
-
-        esp.HealthText.Visible =
-            true
-
-        esp.HealthText.Text =
-            string.format(
-                "%d/%d",
-
-                math.floor(
-                    humanoid.Health
-                ),
-
-                math.floor(
-                    humanoid.MaxHealth
-                )
-            )
-
-
-        esp.HealthText.Position =
-            Vector2.new(
-                bounds.X +
-                bounds.Width +
-                22,
-
-                bounds.Y +
-                bounds.Height / 2
-            )
-
-        esp.HealthText.Color =
-            color
-
-    else
-
-        esp.HealthText.Visible =
-            false
-
+    if esp.Gui then
+        esp.Gui.Enabled = false
     end
 
+    esp.Mode = "None"
+end
 
-    --==========================================================
-    -- SKELETON
-    --==========================================================
+--==============================================================
+-- REMOVE ESP
+--==============================================================
 
-    if Settings.SkeletonESP then
+local function removeESP(player)
 
-        for i, pair in ipairs(
-            SkeletonConnections
-        ) do
+    local esp =
+        ESPObjects[player]
 
-            local partA =
-                GetBodyPart(
-                    character,
-                    pair[1]
-                )
-
-            local partB =
-                GetBodyPart(
-                    character,
-                    pair[2]
-                )
-
-
-            local line =
-                esp.Skeleton[i]
-
-
-            if partA and partB then
-
-                local posA, visibleA =
-                    Camera:WorldToViewportPoint(
-                        partA.Position
-                    )
-
-
-                local posB, visibleB =
-                    Camera:WorldToViewportPoint(
-                        partB.Position
-                    )
-
-
-                if visibleA
-                    and visibleB
-                    and posA.Z > 0
-                    and posB.Z > 0 then
-
-                    line.Visible = true
-
-                    line.From =
-                        Vector2.new(
-                            posA.X,
-                            posA.Y
-                        )
-
-                    line.To =
-                        Vector2.new(
-                            posB.X,
-                            posB.Y
-                        )
-
-                    line.Color =
-                        color
-
-                else
-
-                    line.Visible = false
-
-                end
-
-            else
-
-                line.Visible = false
-
-            end
-        end
-
-    else
-
-        for _, line in pairs(
-            esp.Skeleton
-        ) do
-
-            line.Visible = false
-
-        end
+    if not esp then
+        return
     end
 
+    if esp.Tween then
+        pcall(function()
+            esp.Tween:Cancel()
+        end)
+    end
 
-    --==========================================================
-    -- HIGHLIGHT
-    --==========================================================
+    if esp.Part then
+        esp.Part:Destroy()
+    end
 
-    UpdateHighlight(
-        player,
-        character,
-        true
-    )
+    ESPObjects[player] = nil
+end
+
+--==============================================================
+-- INITIAL PLAYERS
+--==============================================================
+
+for _, player in ipairs(
+    Players:GetPlayers()
+) do
+
+    createESP(player)
 
 end
 
+--==============================================================
+-- PLAYER ADDED
+--==============================================================
+
+Players.PlayerAdded:Connect(function(player)
+
+    createESP(player)
+
+end)
 
 --==============================================================
--- ESP RENDER LOOP
+-- PLAYER REMOVING
 --==============================================================
 
-RunService.RenderStepped:Connect(
-    function()
+Players.PlayerRemoving:Connect(function(player)
 
-        Camera =
-            Workspace.CurrentCamera
+    removeESP(player)
 
+end)
 
-        for player, esp in pairs(
+--==============================================================
+-- CHARACTER ADDED
+--==============================================================
+
+local function setupESPCharacter(player)
+
+    player.CharacterAdded:Connect(function()
+
+        local esp =
+            ESPObjects[player]
+
+        if esp then
+
+            esp.LastPos = nil
+
+            esp.LastValidTime =
+                os.clock()
+
+            esp.Mode = "None"
+
+        end
+
+    end)
+end
+
+for _, player in ipairs(
+    Players:GetPlayers()
+) do
+
+    if player ~= LocalPlayer then
+        setupESPCharacter(player)
+    end
+
+end
+
+Players.PlayerAdded:Connect(function(player)
+
+    if player ~= LocalPlayer then
+        setupESPCharacter(player)
+    end
+
+end)
+
+--==============================================================
+-- UPDATE LAST POSITION
+--==============================================================
+
+local function updateLastPosition(
+    player,
+    esp,
+    distance
+)
+
+    local pos =
+        player:GetAttribute(
+            "LastPosition"
+        )
+
+    if typeof(pos) ~= "Vector3" then
+        return false
+    end
+
+    -- сохраняем последнюю валидную позицию
+    esp.LastPos = pos
+
+    --==========================================================
+    -- UPDATE BILLBOARD POSITION
+    --==========================================================
+
+    if esp.Mode ~= "LastPosition" then
+
+        esp.Part.Position = pos
+
+        esp.Mode = "LastPosition"
+
+    else
+
+        local current =
+            esp.Part.Position
+
+        local newPosition =
+            current:Lerp(
+                pos,
+                ESPSettings.Smoothness
+            )
+
+        esp.Part.Position =
+            newPosition
+    end
+
+    --==========================================================
+    -- SHOW
+    --==========================================================
+
+    esp.Gui.Enabled = true
+
+    --==========================================================
+    -- LAST POSITION STYLE
+    --==========================================================
+
+    esp.BoxStroke.Color =
+        State.ESPColor
+
+    esp.NameText.Text =
+        player.DisplayName
+
+    esp.HealthBackground.Visible =
+        false
+
+    esp.HealthBar.Visible =
+        false
+
+    esp.HealthText.Visible =
+        false
+
+    esp.DistanceText.Visible =
+        true
+
+    esp.DistanceText.Text =
+        math.floor(distance)
+        .. " Stud"
+
+    return true
+end
+
+--==============================================================
+-- MAIN HYBRID ESP LOOP
+--==============================================================
+
+RunService.RenderStepped:Connect(function()
+
+    --==========================================================
+    -- DISABLED
+    --==========================================================
+
+    if not State.ESPEnabled then
+
+        for _, esp in pairs(
             ESPObjects
         ) do
 
-            if player.Parent == Players then
+            hideESP(esp)
 
-                pcall(function()
+        end
 
-                    UpdateESP(
-                        player,
-                        esp
+        return
+    end
+
+    --==========================================================
+    -- PLAYERS
+    --==========================================================
+
+    for player, esp in pairs(
+        ESPObjects
+    ) do
+
+        if player.Parent ~= Players then
+
+            removeESP(player)
+
+            continue
+        end
+
+        --======================================================
+        -- CHARACTER
+        --======================================================
+
+        local character =
+            player.Character
+
+        local humanoid =
+            character
+            and character:FindFirstChildOfClass(
+                "Humanoid"
+            )
+
+        --======================================================
+        -- LOCAL PLAYER POSITION
+        --======================================================
+
+        local localCharacter =
+            LocalPlayer.Character
+
+        local localRoot =
+            localCharacter
+            and localCharacter:FindFirstChild(
+                "HumanoidRootPart"
+            )
+
+        if not localRoot then
+
+            hideESP(esp)
+
+            continue
+        end
+
+        --======================================================
+        -- TRY HYBRID FIRST
+        --======================================================
+
+        local hybridBox = nil
+
+        if character then
+
+            hybridBox =
+                getHybridBoundingBox(
+                    character
+                )
+        end
+
+        --======================================================
+        -- HYBRID SUCCESS
+        --======================================================
+
+        if hybridBox then
+
+            esp.Mode = "Hybrid"
+
+            esp.Gui.Enabled = false
+
+            --==================================================
+            -- REAL CHARACTER BOX
+            --==================================================
+
+            -- Billboard отключён.
+            -- Для Hybrid используем ScreenGui.
+            -- Создаём его лениво.
+
+            if not esp.ScreenGui then
+
+                local screenGui =
+                    Instance.new(
+                        "ScreenGui"
                     )
 
-                end)
+                screenGui.Name =
+                    "HybridESP"
 
+                screenGui.IgnoreGuiInset =
+                    true
+
+                screenGui.ResetOnSpawn =
+                    false
+
+                screenGui.Parent =
+                    LocalPlayer.PlayerGui
+
+                local frame =
+                    Instance.new(
+                        "Frame"
+                    )
+
+                frame.Name = "Box"
+
+                frame.BackgroundTransparency =
+                    1
+
+                frame.BorderSizePixel = 0
+
+                frame.Parent =
+                    screenGui
+
+                local stroke =
+                    Instance.new(
+                        "UIStroke"
+                    )
+
+                stroke.Thickness =
+                    ESPSettings.BoxThickness
+
+                stroke.Color =
+                    State.ESPColor
+
+                stroke.Parent = frame
+
+                -- NAME
+
+                local name =
+                    Instance.new(
+                        "TextLabel"
+                    )
+
+                name.Name = "Name"
+
+                name.AnchorPoint =
+                    Vector2.new(
+                        0.5,
+                        1
+                    )
+
+                name.BackgroundTransparency =
+                    1
+
+                name.TextColor3 =
+                    ESPSettings.TextColor
+
+                name.TextStrokeColor3 =
+                    Color3.new(
+                        0,
+                        0,
+                        0
+                    )
+
+                name.TextStrokeTransparency =
+                    0
+
+                name.Font =
+                    Enum.Font.GothamBold
+
+                name.TextSize = 13
+
+                name.Parent =
+                    screenGui
+
+                -- HP
+
+                local hp =
+                    Instance.new(
+                        "TextLabel"
+                    )
+
+                hp.Name =
+                    "Health"
+
+                hp.AnchorPoint =
+                    Vector2.new(
+                        0,
+                        0.5
+                    )
+
+                hp.BackgroundTransparency =
+                    1
+
+                hp.TextStrokeColor3 =
+                    Color3.new(
+                        0,
+                        0,
+                        0
+                    )
+
+                hp.TextStrokeTransparency =
+                    0
+
+                hp.Font =
+                    Enum.Font.GothamBold
+
+                hp.TextSize = 11
+
+                hp.TextXAlignment =
+                    Enum.TextXAlignment.Left
+
+                hp.Parent =
+                    screenGui
+
+                -- DISTANCE
+
+                local distance =
+                    Instance.new(
+                        "TextLabel"
+                    )
+
+                distance.Name =
+                    "Distance"
+
+                distance.AnchorPoint =
+                    Vector2.new(
+                        0.5,
+                        0
+                    )
+
+                distance.BackgroundTransparency =
+                    1
+
+                distance.TextColor3 =
+                    Color3.fromRGB(
+                        200,
+                        200,
+                        200
+                    )
+
+                distance.TextStrokeColor3 =
+                    Color3.new(
+                        0,
+                        0,
+                        0
+                    )
+
+                distance.TextStrokeTransparency =
+                    0
+
+                distance.Font =
+                    Enum.Font.Gotham
+
+                distance.TextSize = 11
+
+                distance.Parent =
+                    screenGui
+
+                esp.ScreenGui =
+                    screenGui
+
+                esp.ScreenBox =
+                    frame
+
+                esp.ScreenStroke =
+                    stroke
+
+                esp.ScreenName =
+                    name
+
+                esp.ScreenHealth =
+                    hp
+
+                esp.ScreenDistance =
+                    distance
+            end
+
+            --==================================================
+            -- ENABLE SCREEN ESP
+            --==================================================
+
+            esp.ScreenGui.Enabled = true
+
+            local box =
+                esp.ScreenBox
+
+            local stroke =
+                esp.ScreenStroke
+
+            local name =
+                esp.ScreenName
+
+            local hp =
+                esp.ScreenHealth
+
+            local distanceLabel =
+                esp.ScreenDistance
+
+            --==================================================
+            -- BOX
+            --==================================================
+
+            box.Position =
+                UDim2.fromOffset(
+                    hybridBox.X,
+                    hybridBox.Y
+                )
+
+            box.Size =
+                UDim2.fromOffset(
+                    hybridBox.Width,
+                    hybridBox.Height
+                )
+
+            stroke.Color =
+                State.ESPColor
+
+            --==================================================
+            -- NAME
+            --==================================================
+
+            name.Position =
+                UDim2.fromOffset(
+                    hybridBox.CenterX,
+                    hybridBox.Y - 4
+                )
+
+            name.Size =
+                UDim2.fromOffset(
+                    200,
+                    18
+                )
+
+            name.Text =
+                player.DisplayName
+
+            --==================================================
+            -- HEALTH
+            --==================================================
+
+            local healthColor =
+                Color3.fromRGB(
+                    180,
+                    180,
+                    180
+                )
+
+            if humanoid
+                and humanoid.MaxHealth > 0 then
+
+                local health =
+                    math.clamp(
+                        humanoid.Health,
+                        0,
+                        humanoid.MaxHealth
+                    )
+
+                local maxHealth =
+                    math.max(
+                        humanoid.MaxHealth,
+                        1
+                    )
+
+                local percent =
+                    math.clamp(
+                        health / maxHealth,
+                        0,
+                        1
+                    )
+
+                healthColor =
+                    getESPHealthColor(
+                        percent
+                    )
+
+                hp.Text =
+                    string.format(
+                        "%d / %d HP",
+                        math.floor(health),
+                        math.floor(maxHealth)
+                    )
+
+            else
+
+                hp.Text =
+                    "? HP"
+            end
+
+            hp.TextColor3 =
+                healthColor
+
+            hp.Position =
+                UDim2.fromOffset(
+                    hybridBox.X
+                    + hybridBox.Width
+                    + 6,
+
+                    hybridBox.CenterY
+                )
+
+            hp.Size =
+                UDim2.fromOffset(
+                    80,
+                    18
+                )
+
+            --==================================================
+            -- DISTANCE
+            --==================================================
+
+            local worldPosition
+
+            local primary =
+                character.PrimaryPart
+
+            if primary then
+                worldPosition =
+                    primary.Position
+            else
+                worldPosition =
+                    character:GetPivot().Position
+            end
+
+            local distance =
+                (
+                    localRoot.Position
+                    - worldPosition
+                ).Magnitude
+
+            distanceLabel.Position =
+                UDim2.fromOffset(
+                    hybridBox.CenterX,
+                    hybridBox.Y
+                    + hybridBox.Height
+                    + 4
+                )
+
+            distanceLabel.Size =
+                UDim2.fromOffset(
+                    100,
+                    18
+                )
+
+            distanceLabel.Text =
+                math.floor(distance)
+                .. " Stud"
+
+            --==================================================
+            -- SAVE LAST POSITION
+            --==================================================
+
+            local lastPosition =
+                character:GetPivot().Position
+
+            player:SetAttribute(
+                "LastPosition",
+                lastPosition
+            )
+
+            esp.LastValidTime =
+                os.clock()
+
+            continue
+        end
+
+        --======================================================
+        -- HYBRID FAILED
+        --======================================================
+
+        if esp.ScreenGui then
+            esp.ScreenGui.Enabled = false
+        end
+
+        --======================================================
+        -- LAST POSITION FALLBACK
+        --======================================================
+
+        local lastPosition =
+            player:GetAttribute(
+                "LastPosition"
+            )
+
+        if typeof(lastPosition) ==
+            "Vector3" then
+
+            local distance =
+                (
+                    localRoot.Position
+                    - lastPosition
+                ).Magnitude
+
+            if distance <=
+                ESPSettings.MaxDistance then
+
+                updateLastPosition(
+                    player,
+                    esp,
+                    distance
+                )
+
+                continue
             end
         end
+
+        --======================================================
+        -- NOTHING AVAILABLE
+        --======================================================
+
+        hideESP(esp)
+
     end
+end)
+
+--==============================================================
+-- CLEANUP
+--==============================================================
+
+Players.PlayerRemoving:Connect(function(player)
+
+    local esp =
+        ESPObjects[player]
+
+    if esp then
+
+        if esp.ScreenGui then
+            esp.ScreenGui:Destroy()
+        end
+
+        if esp.Part then
+            esp.Part:Destroy()
+        end
+
+        ESPObjects[player] = nil
+    end
+end)
+
+print(
+    "[aesthetic] Hybrid ESP loaded"
 )
-
-
 --==============================================================
--- VISUALS TAB
+-- FOV CIRCLE
 --==============================================================
 
-VisualsTab:CreateSection(
-    "ESP"
+--==============================================================
+-- FOV CIRCLE — ROBLOX GUI
+--==============================================================
+
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "AestheticFOV"
+FOVGui.ResetOnSpawn = false
+FOVGui.IgnoreGuiInset = true
+FOVGui.DisplayOrder = 999999
+FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "Circle"
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Size = UDim2.fromOffset(
+    State.FOVSize * 2,
+    State.FOVSize * 2
 )
+FOVCircle.Position = UDim2.fromScale(0.5, 0.5)
+FOVCircle.Parent = FOVGui
 
+local FOVCorner = Instance.new("UICorner")
+FOVCorner.CornerRadius = UDim.new(1, 0)
+FOVCorner.Parent = FOVCircle
 
-VisualsTab:CreateToggle({
+local FOVStroke = Instance.new("UIStroke")
+FOVStroke.Thickness = 1.5
+FOVStroke.Color = State.FOVColor
+FOVStroke.Transparency = 0
+FOVStroke.Parent = FOVCircle
 
-    Name = "ESP",
+FOVGui.Enabled = false
 
-    CurrentValue =
-        Settings.ESPEnabled,
+local rainbowHue = 0
 
-    Callback = function(value)
+RunService.RenderStepped:Connect(function(dt)
 
-        Settings.ESPEnabled =
-            value
+    if not State.FOVEnabled then
+        FOVGui.Enabled = false
+        return
+    end
+
+    FOVGui.Enabled = true
+
+    FOVCircle.Position =
+        UDim2.fromOffset(
+            Camera.ViewportSize.X / 2,
+            Camera.ViewportSize.Y / 2
+        )
+
+    FOVCircle.Size =
+        UDim2.fromOffset(
+            State.FOVSize * 2,
+            State.FOVSize * 2
+        )
+
+    if State.FOVRainbow then
+
+        rainbowHue =
+            (rainbowHue + dt * 0.5) % 1
+
+        FOVStroke.Color =
+            Color3.fromHSV(
+                rainbowHue,
+                1,
+                1
+            )
+
+    else
+
+        FOVStroke.Color =
+            State.FOVColor
 
     end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "2D Box ESP",
-
-    CurrentValue =
-        Settings.BoxESP,
-
-    Callback = function(value)
-
-        Settings.BoxESP =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Skeleton ESP",
-
-    CurrentValue =
-        Settings.SkeletonESP,
-
-    Callback = function(value)
-
-        Settings.SkeletonESP =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Health Bar",
-
-    CurrentValue =
-        Settings.HealthBar,
-
-    Callback = function(value)
-
-        Settings.HealthBar =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Health Text",
-
-    CurrentValue =
-        Settings.HealthText,
-
-    Callback = function(value)
-
-        Settings.HealthText =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Name ESP",
-
-    CurrentValue =
-        Settings.NameESP,
-
-    Callback = function(value)
-
-        Settings.NameESP =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Distance ESP",
-
-    CurrentValue =
-        Settings.DistanceESP,
-
-    Callback = function(value)
-
-        Settings.DistanceESP =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateColorPicker({
-
-    Name = "ESP Color",
-
-    Color =
-        Settings.ESPColor,
-
-    Callback = function(value)
-
-        Settings.ESPColor =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateSection(
-    "Target Highlight"
-)
-
-
-VisualsTab:CreateToggle({
-
-    Name = "Target Highlight",
-
-    CurrentValue =
-        Settings.TargetHighlight,
-
-    Callback = function(value)
-
-        Settings.TargetHighlight =
-            value
-
-    end
-})
-
-
-VisualsTab:CreateColorPicker({
-
-    Name = "Target Highlight Color",
-
-    Color =
-        Settings.TargetHighlightColor,
-
-    Callback = function(value)
-
-        Settings.TargetHighlightColor =
-            value
-
-    end
-})
-
-
+end)
 --==============================================================
--- KILL AURA
+-- AIMBOT
 --==============================================================
 
-local ActionsSystem =
-    ReplicatedStorage
-    :WaitForChild("Systems")
-    :WaitForChild("ActionsSystem")
+--==============================================================
+-- UNIVERSAL AIM PART
+--==============================================================
 
-
-local AttackRemote =
-    ActionsSystem
-    :WaitForChild("Network")
-    :WaitForChild("Attack")
-
-
-local KillAuraEnabled = false
-
-
-local function GetNearestTarget()
-
-    local character =
-        LocalPlayer.Character
-
+local function getAimPart(character)
 
     if not character then
         return nil
     end
 
+    -- 1. Head
+    local head =
+        character:FindFirstChild("Head")
 
+    if head
+        and head:IsA("BasePart") then
+
+        return head
+    end
+
+    -- 2. PrimaryPart
+    if character.PrimaryPart
+        and character.PrimaryPart:IsA("BasePart") then
+
+        return character.PrimaryPart
+    end
+
+    -- 3. HumanoidRootPart
     local root =
         character:FindFirstChild(
             "HumanoidRootPart"
         )
-        or character.PrimaryPart
 
+    if root
+        and root:IsA("BasePart") then
 
-    if not root then
-        return nil
+        return root
     end
 
+    -- 4. Любая подходящая часть
+    for _, obj in ipairs(
+        character:GetDescendants()
+    ) do
 
-    local nearest = nil
+        if obj:IsA("BasePart")
+            and obj.Transparency < 1 then
+
+            return obj
+        end
+    end
+
+    return nil
+end
+
+--==============================================================
+-- AIMBOT TARGET
+--==============================================================
+
+local function getAimbotTarget()
+
+    local center =
+        Vector2.new(
+            Camera.ViewportSize.X / 2,
+            Camera.ViewportSize.Y / 2
+        )
+
+    local nearestPart = nil
 
     local nearestDistance =
-        Settings.KillAuraRange
-
+        State.FOVSize
 
     for _, player in ipairs(
         Players:GetPlayers()
     ) do
 
-        if player ~= LocalPlayer then
+        if player == LocalPlayer then
+            continue
+        end
 
-            local target =
-                player.Character
+        local character =
+            player.Character
 
+        if not character then
+            continue
+        end
 
-            if target then
+        -- Humanoid необязателен
+        -- для твоей нестандартной игры
+        local humanoid =
+            character:FindFirstChildOfClass(
+                "Humanoid"
+            )
 
-                local targetRoot =
-                    target:FindFirstChild(
-                        "HumanoidRootPart"
-                    )
-                    or target.PrimaryPart
+        if humanoid
+            and humanoid.Health <= 0 then
 
+            continue
+        end
 
-                local humanoid =
-                    target:FindFirstChildOfClass(
-                        "Humanoid"
-                    )
+        local aimPart =
+            getAimPart(character)
 
+        if not aimPart then
+            continue
+        end
 
-                if targetRoot
-                    and humanoid
-                    and humanoid.Health > 0 then
+        local screenPosition,
+              onScreen =
+            Camera:WorldToViewportPoint(
+                aimPart.Position
+            )
 
-                    local distance =
-                        (
-                            targetRoot.Position -
-                            root.Position
-                        ).Magnitude
+        if not onScreen then
+            continue
+        end
 
+        if screenPosition.Z <= 0 then
+            continue
+        end
 
-                    if distance <= nearestDistance then
+        local screenDistance =
+            (
+                Vector2.new(
+                    screenPosition.X,
+                    screenPosition.Y
+                )
+                - center
+            ).Magnitude
 
-                        nearest =
-                            target
+        if screenDistance <
+            nearestDistance then
 
-                        nearestDistance =
-                            distance
+            nearestDistance =
+                screenDistance
 
-                    end
-                end
-            end
+            nearestPart =
+                aimPart
         end
     end
 
-
-    return nearest
+    return nearestPart
 end
 
+--==============================================================
+-- AIMBOT
+--==============================================================
 
+RunService.RenderStepped:Connect(function()
+
+    if not State.AimbotEnabled then
+        return
+    end
+
+    local target =
+        getAimbotTarget()
+
+    if not target then
+        return
+    end
+
+    if not target.Parent then
+        return
+    end
+
+    Camera.CFrame =
+        CFrame.new(
+            Camera.CFrame.Position,
+            target.Position
+        )
+end)
 --==============================================================
 -- KILL AURA LOOP
 --==============================================================
 
-task.spawn(
-    function()
-
-        while task.wait(
-            math.max(
-                Settings.KillAuraDelay,
-                0.05
-            )
-        ) do
-
-            if KillAuraEnabled then
-
-                local target =
-                    GetNearestTarget()
-
-
-                if target then
-
-                    local character =
-                        LocalPlayer.Character
-
-
-                    local hotbarSlot =
-                        character
-                        and character:GetAttribute(
-                            "ReplicatedHotbarSlot"
-                        )
-
-
-                    if hotbarSlot then
-
+task.spawn(function()
+    while true do
+        if State.KillAura then
+            local target = getNearestTarget()
+            if target then
+                local char = LocalPlayer.Character
+                if char then
+                    local slot = char:GetAttribute("ReplicatedHotbarSlot")
+                    if slot ~= nil then
                         pcall(function()
-
-                            AttackRemote:InvokeServer(
-                                target,
-                                tostring(
-                                    hotbarSlot
-                                )
-                            )
-
+                            AttackRemote:InvokeServer(target, tostring(slot))
                         end)
-
                     end
                 end
             end
         end
+        task.wait(State.AttackDelay)
     end
-)
-
+end)
 
 --==============================================================
--- FOV CIRCLE
+-- NO FALL DAMAGE / NO DROW DAMAGE (namecall hook)
 --==============================================================
 
-local FOVCircle =
-    Drawing.new("Circle")
+if typeof(hookmetamethod) == "function" then
+    State.OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
 
-
-FOVCircle.Visible = false
-
-FOVCircle.Filled = false
-
-FOVCircle.NumSides = 64
-
-FOVCircle.Thickness = 1.5
-
-
-RunService.RenderStepped:Connect(
-    function()
-
-        Camera =
-            Workspace.CurrentCamera
-
-
-        if not KillAuraEnabled
-            or not Settings.ShowFOV then
-
-            FOVCircle.Visible = false
-
-            return
+        if method == "FireServer" then
+            if self == FallRemote and (State.NoFallDamage or State.NoDrowDamage) then
+                return
+            end
         end
 
-
-        FOVCircle.Visible = true
-
-        FOVCircle.Color =
-            Settings.FOVColor
-
-        FOVCircle.Radius =
-            Settings.FOVRadius
-
-
-        FOVCircle.Position =
-            Vector2.new(
-                Camera.ViewportSize.X / 2,
-                Camera.ViewportSize.Y / 2
-            )
-
-    end
-)
-
-
---==============================================================
--- KILL AURA TAB
---==============================================================
-
-KillAuraTab:CreateSection(
-    "Kill Aura"
-)
-
-
-KillAuraTab:CreateToggle({
-
-    Name = "Kill Aura",
-
-    CurrentValue =
-        Settings.KillAura,
-
-    Callback = function(value)
-
-        KillAuraEnabled =
-            value
-
-        Settings.KillAura =
-            value
-
-    end
-})
-
-
-KillAuraTab:CreateSlider({
-
-    Name = "Range",
-
-    Range = {
-        5,
-        100
-    },
-
-    Increment = 1,
-
-    Suffix = " studs",
-
-    CurrentValue =
-        Settings.KillAuraRange,
-
-    Callback = function(value)
-
-        Settings.KillAuraRange =
-            value
-
-    end
-})
-
-
-KillAuraTab:CreateToggle({
-
-    Name = "Show FOV(not working)",
-
-    CurrentValue =
-        Settings.ShowFOV,
-
-    Callback = function(value)
-
-        Settings.ShowFOV =
-            value
-
-    end
-})
-
-
-KillAuraTab:CreateSlider({
-
-    Name = "FOV",
-
-    Range = {
-        25,
-        500
-    },
-
-    Increment = 5,
-
-    Suffix = " px",
-
-    CurrentValue =
-        Settings.FOVRadius,
-
-    Callback = function(value)
-
-        Settings.FOVRadius =
-            value
-
-    end
-})
-
-
-KillAuraTab:CreateColorPicker({
-
-    Name = "FOV Color",
-
-    Color =
-        Settings.FOVColor,
-
-    Callback = function(value)
-
-        Settings.FOVColor =
-            value
-
-    end
-})
-
-
-KillAuraTab:CreateSlider({
-
-    Name = "Attack Delay",
-
-    Range = {
-        0.05,
-        2
-    },
-
-    Increment = 0.05,
-
-    Suffix = " sec",
-
-    CurrentValue =
-        Settings.KillAuraDelay,
-
-    Callback = function(value)
-
-        Settings.KillAuraDelay =
-            value
-
-    end
-})
-
-
---==============================================================
--- MOBILE FLY
---==============================================================
-
-local FlyConnection = nil
-local FlyVelocity = nil
-local FlyAttachment = nil
-
-
-local FlyInput = {
-
-    Forward = false,
-    Backward = false,
-
-    Left = false,
-    Right = false,
-
-    Up = false,
-    Down = false
-}
-
-
-local function StopFly()
-
-    if FlyConnection then
-
-        FlyConnection:Disconnect()
-
-        FlyConnection = nil
-
-    end
-
-
-    if FlyVelocity then
-
-        pcall(function()
-            FlyVelocity:Destroy()
-        end)
-
-        FlyVelocity = nil
-
-    end
-
-
-    if FlyAttachment then
-
-        pcall(function()
-            FlyAttachment:Destroy()
-        end)
-
-        FlyAttachment = nil
-
-    end
-
+        return State.OldNamecall(self, ...)
+    end)
 end
 
+--==============================================================
+-- FLY
+--==============================================================
 
-local function StartFly()
+--==============================================================
+-- MOBILE FLY CONTROLS
+--==============================================================
 
-    StopFly()
+local FlyGui = Instance.new("ScreenGui")
+FlyGui.Name = "AestheticMobileFly"
+FlyGui.ResetOnSpawn = false
+FlyGui.IgnoreGuiInset = true
+FlyGui.Enabled = false
+FlyGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
+local FlyFrame = Instance.new("Frame")
+FlyFrame.Name = "Controls"
+FlyFrame.AnchorPoint = Vector2.new(1, 1)
+FlyFrame.Position = UDim2.new(1, -25, 1, -35)
+FlyFrame.Size = UDim2.fromOffset(220, 190)
+FlyFrame.BackgroundTransparency = 1
+FlyFrame.Parent = FlyGui
 
-    local character =
+local FlyButtons = {}
+
+local function createFlyButton(
+    name,
+    text,
+    position
+)
+
+    local button = Instance.new("TextButton")
+
+    button.Name = name
+    button.Text = text
+
+    button.Position = position
+    button.Size = UDim2.fromOffset(60, 50)
+
+    button.BackgroundColor3 =
+        Color3.fromRGB(25, 25, 25)
+
+    button.BackgroundTransparency = 0.2
+
+    button.TextColor3 =
+        Color3.fromRGB(255, 255, 255)
+
+    button.TextSize = 20
+    button.Font = Enum.Font.GothamBold
+
+    button.AutoButtonColor = true
+
+    button.BorderSizePixel = 0
+
+    local corner =
+        Instance.new("UICorner")
+
+    corner.CornerRadius =
+        UDim.new(0, 10)
+
+    corner.Parent = button
+
+    button.Parent = FlyFrame
+
+    FlyButtons[name] = {
+        Button = button,
+        Held = false
+    }
+
+    -- Touch / mobile
+    button.InputBegan:Connect(function(input)
+
+        if input.UserInputType ==
+            Enum.UserInputType.Touch
+            or input.UserInputType ==
+            Enum.UserInputType.MouseButton1 then
+
+            FlyButtons[name].Held = true
+        end
+    end)
+
+    button.InputEnded:Connect(function(input)
+
+        if input.UserInputType ==
+            Enum.UserInputType.Touch
+            or input.UserInputType ==
+            Enum.UserInputType.MouseButton1 then
+
+            FlyButtons[name].Held = false
+        end
+    end)
+
+    return button
+end
+
+--==============================================================
+-- BUTTON LAYOUT
+--==============================================================
+
+createFlyButton(
+    "Forward",
+    "▲",
+    UDim2.fromOffset(80, 0)
+)
+
+createFlyButton(
+    "Left",
+    "◀",
+    UDim2.fromOffset(15, 55)
+)
+
+createFlyButton(
+    "Back",
+    "▼",
+    UDim2.fromOffset(80, 55)
+)
+
+createFlyButton(
+    "Right",
+    "▶",
+    UDim2.fromOffset(145, 55)
+)
+
+createFlyButton(
+    "Up",
+    "UP",
+    UDim2.fromOffset(145, 110)
+)
+
+createFlyButton(
+    "Down",
+    "DOWN",
+    UDim2.fromOffset(15, 110)
+)
+
+--==============================================================
+-- FLY
+--==============================================================
+
+local function enableFly()
+
+    local char =
         LocalPlayer.Character
 
-
-    if not character then
+    if not char then
         return
     end
 
-
     local root =
-        character:FindFirstChild(
-            "HumanoidRootPart"
-        )
-
+        getRoot(char)
 
     if not root then
         return
     end
 
+    local hum =
+        getHumanoid(char)
 
-    FlyAttachment =
-        Instance.new("Attachment")
+    if not hum then
+        return
+    end
 
+    -- Remove old objects
+    if State.FlyBodyVelocity then
+        State.FlyBodyVelocity:Destroy()
+        State.FlyBodyVelocity = nil
+    end
 
-    FlyAttachment.Name =
-        "VoxelFlyAttachment"
+    if State.FlyBodyGyro then
+        State.FlyBodyGyro:Destroy()
+        State.FlyBodyGyro = nil
+    end
 
-    FlyAttachment.Parent =
-        root
+    hum.PlatformStand = true
 
+    local bv =
+        Instance.new("BodyVelocity")
 
-    FlyVelocity =
-        Instance.new("LinearVelocity")
+    bv.MaxForce =
+        Vector3.new(
+            1e9,
+            1e9,
+            1e9
+        )
 
-
-    FlyVelocity.Name =
-        "VoxelFlyVelocity"
-
-    FlyVelocity.Attachment0 =
-        FlyAttachment
-
-    FlyVelocity.MaxForce =
-        math.huge
-
-    FlyVelocity.RelativeTo =
-        Enum.ActuatorRelativeTo.World
-
-    FlyVelocity.VectorVelocity =
+    bv.Velocity =
         Vector3.zero
 
-    FlyVelocity.Parent =
-        root
+    bv.Parent = root
 
+    State.FlyBodyVelocity = bv
 
-    FlyConnection =
-        RunService.RenderStepped:Connect(
-            function()
+    local bg =
+        Instance.new("BodyGyro")
 
-                if not Settings.Fly then
-                    return
-                end
-
-
-                if not root
-                    or not root.Parent then
-
-                    return
-
-                end
-
-
-                local camera =
-                    Workspace.CurrentCamera
-
-
-                local forward =
-                    Vector3.zero
-
-                local right =
-                    Vector3.zero
-
-                local vertical =
-                    0
-
-
-                if FlyInput.Forward then
-                    forward +=
-                        camera.CFrame.LookVector
-                end
-
-
-                if FlyInput.Backward then
-                    forward -=
-                        camera.CFrame.LookVector
-                end
-
-
-                if FlyInput.Right then
-                    right +=
-                        camera.CFrame.RightVector
-                end
-
-
-                if FlyInput.Left then
-                    right -=
-                        camera.CFrame.RightVector
-                end
-
-
-                if FlyInput.Up then
-                    vertical += 1
-                end
-
-
-                if FlyInput.Down then
-                    vertical -= 1
-                end
-
-
-                local direction =
-                    forward + right
-
-
-                if direction.Magnitude > 1 then
-                    direction =
-                        direction.Unit
-                end
-
-
-                FlyVelocity.VectorVelocity =
-                    direction *
-                    Settings.FlySpeed
-                    +
-                    Vector3.new(
-                        0,
-                        vertical *
-                        Settings.FlySpeed,
-                        0
-                    )
-
-            end
+    bg.MaxTorque =
+        Vector3.new(
+            1e9,
+            1e9,
+            1e9
         )
 
+    bg.P = 10000
+
+    bg.CFrame =
+        root.CFrame
+
+    bg.Parent = root
+
+    State.FlyBodyGyro = bg
+
+    -- Show mobile controls
+    FlyGui.Enabled =
+        UserInputService.TouchEnabled
 end
 
+local function disableFly()
 
---==============================================================
--- MOBILE FLY GUI
---==============================================================
+    if State.FlyBodyVelocity then
 
-local FlyGui =
-    Instance.new("ScreenGui")
+        State.FlyBodyVelocity:Destroy()
 
-
-FlyGui.Name =
-    "VoxelCombatMobileFly"
-
-FlyGui.ResetOnSpawn =
-    false
-
-FlyGui.IgnoreGuiInset =
-    true
-
-FlyGui.Enabled =
-    false
-
-FlyGui.Parent =
-    LocalPlayer:WaitForChild(
-        "PlayerGui"
-    )
-
-
-local FlyFrame =
-    Instance.new("Frame")
-
-
-FlyFrame.Name =
-    "FlyControls"
-
-FlyFrame.Size =
-    UDim2.fromOffset(
-        220,
-        220
-    )
-
-FlyFrame.Position =
-    UDim2.new(
-        0,
-        20,
-        1,
-        -240
-    )
-
-FlyFrame.BackgroundTransparency =
-    1
-
-FlyFrame.Parent =
-    FlyGui
-
-
-local function CreateFlyButton(
-    name,
-    text,
-    position,
-    inputName
-)
-
-    local button =
-        Instance.new("TextButton")
-
-
-    button.Name =
-        name
-
-    button.Text =
-        text
-
-    button.Size =
-        UDim2.fromOffset(
-            65,
-            65
-        )
-
-    button.Position =
-        position
-
-    button.BackgroundTransparency =
-        0.2
-
-    button.TextScaled =
-        true
-
-    button.TextColor3 =
-        Color3.fromRGB(
-            255,
-            255,
-            255
-        )
-
-    button.BackgroundColor3 =
-        Color3.fromRGB(
-            25,
-            25,
-            25
-        )
-
-    button.BorderSizePixel =
-        0
-
-    button.Parent =
-        FlyFrame
-
-
-    local corner =
-        Instance.new("UICorner")
-
-
-    corner.CornerRadius =
-        UDim.new(
-            0,
-            14
-        )
-
-    corner.Parent =
-        button
-
-
-    local function setState(state)
-
-        FlyInput[inputName] =
-            state
-
-
-        if state then
-
-            button.BackgroundColor3 =
-                Color3.fromRGB(
-                    70,
-                    70,
-                    70
-                )
-
-        else
-
-            button.BackgroundColor3 =
-                Color3.fromRGB(
-                    25,
-                    25,
-                    25
-                )
-
-        end
-
+        State.FlyBodyVelocity = nil
     end
 
+    if State.FlyBodyGyro then
 
-    button.InputBegan:Connect(
-        function(input)
+        State.FlyBodyGyro:Destroy()
 
-            if input.UserInputType ==
-                Enum.UserInputType.Touch
-                or
-                input.UserInputType ==
-                Enum.UserInputType.MouseButton1 then
+        State.FlyBodyGyro = nil
+    end
 
-                setState(true)
-
-            end
-
-        end
-    )
-
-
-    button.InputEnded:Connect(
-        function(input)
-
-            if input.UserInputType ==
-                Enum.UserInputType.Touch
-                or
-                input.UserInputType ==
-                Enum.UserInputType.MouseButton1 then
-
-                setState(false)
-
-            end
-
-        end
-    )
-
-
-    return button
-
-end
-
-
---==============================================================
--- DIRECTION BUTTONS
---==============================================================
-
-CreateFlyButton(
-    "Forward",
-    "↑",
-    UDim2.fromOffset(
-        77,
-        0
-    ),
-    "Forward"
-)
-
-
-CreateFlyButton(
-    "Left",
-    "←",
-    UDim2.fromOffset(
-        5,
-        72
-    ),
-    "Left"
-)
-
-
-CreateFlyButton(
-    "Backward",
-    "↓",
-    UDim2.fromOffset(
-        77,
-        72
-    ),
-    "Backward"
-)
-
-
-CreateFlyButton(
-    "Right",
-    "→",
-    UDim2.fromOffset(
-        149,
-        72
-    ),
-    "Right"
-)
-
-
-CreateFlyButton(
-    "Up",
-    "UP",
-    UDim2.fromOffset(
-        77,
-        144
-    ),
-    "Up"
-)
-
-
-CreateFlyButton(
-    "Down",
-    "DOWN",
-    UDim2.fromOffset(
-        149,
-        144
-    ),
-    "Down"
-)
-
-
---==============================================================
--- MISK MOVEMENT
---==============================================================
-
-local function ApplyMovement()
-
-    local character =
+    local char =
         LocalPlayer.Character
 
+    local hum =
+        getHumanoid(char)
 
-    if not character then
-        return
+    if hum then
+        hum.PlatformStand = false
     end
 
+    FlyGui.Enabled = false
 
-    local humanoid =
-        character:FindFirstChildOfClass(
-            "Humanoid"
-        )
-
-
-    if not humanoid then
-        return
+    -- Reset buttons
+    for _, data in pairs(FlyButtons) do
+        data.Held = false
     end
-
-
-    humanoid.WalkSpeed =
-        Settings.Speed
-
-
-    humanoid.UseJumpPower =
-        true
-
-
-    humanoid.JumpPower =
-        Settings.JumpPower
-
 end
 
+--==============================================================
+-- FLY MOVEMENT
+--==============================================================
+
+RunService.RenderStepped:Connect(function()
+
+    if not State.FlyEnabled then
+        return
+    end
+
+    local bv =
+        State.FlyBodyVelocity
+
+    local bg =
+        State.FlyBodyGyro
+
+    if not bv or not bg then
+        return
+    end
+
+    local direction =
+        Vector3.zero
+
+    --==========================================================
+    -- KEYBOARD
+    --==========================================================
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.W
+    ) then
+
+        direction +=
+            Camera.CFrame.LookVector
+    end
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.S
+    ) then
+
+        direction -=
+            Camera.CFrame.LookVector
+    end
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.A
+    ) then
+
+        direction -=
+            Camera.CFrame.RightVector
+    end
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.D
+    ) then
+
+        direction +=
+            Camera.CFrame.RightVector
+    end
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.Space
+    ) then
+
+        direction +=
+            Vector3.new(0, 1, 0)
+    end
+
+    if UserInputService:IsKeyDown(
+        Enum.KeyCode.LeftControl
+    ) then
+
+        direction -=
+            Vector3.new(0, 1, 0)
+    end
+
+    --==========================================================
+    -- MOBILE
+    --==========================================================
+
+    if FlyButtons.Forward.Held then
+
+        direction +=
+            Camera.CFrame.LookVector
+    end
+
+    if FlyButtons.Back.Held then
+
+        direction -=
+            Camera.CFrame.LookVector
+    end
+
+    if FlyButtons.Left.Held then
+
+        direction -=
+            Camera.CFrame.RightVector
+    end
+
+    if FlyButtons.Right.Held then
+
+        direction +=
+            Camera.CFrame.RightVector
+    end
+
+    if FlyButtons.Up.Held then
+
+        direction +=
+            Vector3.new(
+                0,
+                1,
+                0
+            )
+    end
+
+    if FlyButtons.Down.Held then
+
+        direction -=
+            Vector3.new(
+                0,
+                1,
+                0
+            )
+    end
+
+    --==========================================================
+    -- VELOCITY
+    --==========================================================
+
+    if direction.Magnitude > 0 then
+
+        bv.Velocity =
+            direction.Unit
+            * State.Speed
+
+    else
+
+        bv.Velocity =
+            Vector3.zero
+    end
+
+    -- Follow camera
+    bg.CFrame =
+        Camera.CFrame
+end)
+
+--==============================================================
+-- SPEED & JUMP POWER
+--==============================================================
+
+local function applyCharacterStats()
+
+    local char = LocalPlayer.Character
+    if not char then
+        return
+    end
+
+    local hum = getHumanoid(char)
+    if not hum then
+        return
+    end
+
+    -- SPEED
+    hum.WalkSpeed = State.Speed
+
+    -- JUMP POWER
+    pcall(function()
+        hum.UseJumpPower = true
+    end)
+
+    hum.JumpPower = State.JumpPower
+end
 
 --==============================================================
 -- CHARACTER RESPAWN
 --==============================================================
 
-LocalPlayer.CharacterAdded:Connect(
-    function()
+LocalPlayer.CharacterAdded:Connect(function()
 
-        task.wait(0.5)
+    task.wait(1)
 
-        ApplyMovement()
+    applyCharacterStats()
 
-
-        if Settings.Fly then
-
-            StartFly()
-
-        end
-
+    if State.FlyEnabled then
+        enableFly()
     end
-)
 
-
+end)
 --==============================================================
--- NOCLIP
+-- CROSSHAIR SYSTEM
 --==============================================================
 
-RunService.Stepped:Connect(
-    function()
+local CrosshairState = {
+    Enabled    = true,
+    Size       = 32,
+    ImageID    = "",
+    CursorName = "",
+    SavedCursors = {},
+}
 
-        if not Settings.Noclip then
+local CURSOR_FOLDER = "aesthetic"
+local CURSOR_FILE   = "aesthetic/cursors.json"
+
+local function hasFS()
+    return type(isfile) == "function"
+        and type(readfile) == "function"
+        and type(writefile) == "function"
+        and type(isfolder) == "function"
+        and type(makefolder) == "function"
+end
+
+local function loadCursors()
+    CrosshairState.SavedCursors = {}
+    if not hasFS() then return end
+    pcall(function()
+        if not isfolder(CURSOR_FOLDER) then makefolder(CURSOR_FOLDER) end
+        if not isfile(CURSOR_FILE) then
+            writefile(CURSOR_FILE, "{}")
             return
         end
-
-
-        local character =
-            LocalPlayer.Character
-
-
-        if not character then
-            return
+        local raw = readfile(CURSOR_FILE)
+        if raw == "" then return end
+        local data = HttpService:JSONDecode(raw)
+        if type(data) == "table" then
+            CrosshairState.SavedCursors = data
         end
+    end)
+end
 
+local function saveCursors()
+    if not hasFS() then return false end
+    return pcall(function()
+        if not isfolder(CURSOR_FOLDER) then makefolder(CURSOR_FOLDER) end
+        writefile(CURSOR_FILE, HttpService:JSONEncode(CrosshairState.SavedCursors))
+    end)
+end
 
-        for _, part in ipairs(
-            character:GetDescendants()
-        ) do
+loadCursors()
 
-            if part:IsA("BasePart") then
+local function getImageObj()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+    local camGui = pg:FindFirstChild("CameraGui")
+    if not camGui then return nil end
+    local crosshair = camGui:FindFirstChild("Crosshair")
+    if not crosshair then return nil end
 
-                part.CanCollide =
-                    false
+    if crosshair:IsA("ImageLabel") or crosshair:IsA("ImageButton") then
+        return crosshair
+    end
+    return crosshair:FindFirstChildWhichIsA("ImageLabel", true)
+        or crosshair:FindFirstChildWhichIsA("ImageButton", true)
+end
 
-            end
+local function applyCrosshairImage(id)
+    local obj = getImageObj()
+    if not obj then return false end
+    id = tostring(id or ""):match("^%s*(.-)%s*$")
+    if id == "" then return false end
+    obj.Image = id:match("^rbxassetid://") and id or ("rbxassetid://" .. id)
+    return true
+end
+
+local function applyCrosshairSize(sz)
+    local obj = getImageObj()
+    if not obj then return end
+    CrosshairState.Size = sz
+    local camGui   = LocalPlayer.PlayerGui:FindFirstChild("CameraGui")
+    local crosshair = camGui and camGui:FindFirstChild("Crosshair")
+    local scale = crosshair and crosshair:FindFirstChildWhichIsA("UIScale", true)
+    if scale then
+        scale.Scale = sz / 32
+    else
+        obj.Size = UDim2.fromOffset(sz, sz)
+    end
+end
+
+local function applyCrosshairVisible(v)
+    local obj = getImageObj()
+    CrosshairState.Enabled = v
+    if obj then obj.Visible = v end
+end
+
+local function getCursorNames()
+    local names = {}
+    for name, data in pairs(CrosshairState.SavedCursors) do
+        if type(data) == "table" and data.id then
+            table.insert(names, name)
         end
     end
-)
-
+    table.sort(names)
+    return names
+end
 
 --==============================================================
--- MISK TAB
+-- CONFIG SYSTEM
 --==============================================================
 
-MiskTab:CreateSection(
-    "Movement"
-)
-
-
-MiskTab:CreateToggle({
-
-    Name = "Fly",
-
-    CurrentValue =
-        Settings.Fly,
-
-    Callback = function(value)
-
-        Settings.Fly =
-            value
-
-        FlyGui.Enabled =
-            value
-
-
-        if value then
-
-            StartFly()
-
-        else
-
-            StopFly()
-
-            for key in pairs(FlyInput) do
-                FlyInput[key] = false
-            end
-
-        end
-
-    end
-})
-
-
-MiskTab:CreateSlider({
-
-    Name = "Fly Speed",
-
-    Range = {
-        10,
-        200
-    },
-
-    Increment = 5,
-
-    Suffix = " speed",
-
-    CurrentValue =
-        Settings.FlySpeed,
-
-    Callback = function(value)
-
-        Settings.FlySpeed =
-            value
-
-    end
-})
-
-
-MiskTab:CreateSlider({
-
-    Name = "Speed",
-
-    Range = {
-        0,
-        200
-    },
-
-    Increment = 1,
-
-    Suffix = " WS",
-
-    CurrentValue =
-        Settings.Speed,
-
-    Callback = function(value)
-
-        Settings.Speed =
-            value
-
-        ApplyMovement()
-
-    end
-})
-
-
-MiskTab:CreateSlider({
-
-    Name = "Jump Power",
-
-    Range = {
-        0,
-        200
-    },
-
-    Increment = 1,
-
-    Suffix = " JP",
-
-    CurrentValue =
-        Settings.JumpPower,
-
-    Callback = function(value)
-
-        Settings.JumpPower =
-            value
-
-        ApplyMovement()
-
-    end
-})
-
-
-MiskTab:CreateToggle({
-
-    Name = "Noclip",
-
-    CurrentValue =
-        Settings.Noclip,
-
-    Callback = function(value)
-
-        Settings.Noclip =
-            value
-
-    end
-})
-
-
---==============================================================
--- CONFIG TAB
---==============================================================
-
-ConfigTab:CreateSection(
-    "Config Manager"
-)
-
-
-local ConfigName =
-    Settings.CurrentConfig
-
-
-ConfigTab:CreateInput({
-
-    Name = "Config Name",
-
-    PlaceholderText =
-        "Enter config name",
-
-    RemoveTextAfterFocusLost =
-        false,
-
-    Callback = function(text)
-
-        if text
-            and text ~= "" then
-
-            ConfigName =
-                text
-
-            Settings.CurrentConfig =
-                text
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Create Config",
-
-    Callback = function()
-
-        if SaveConfig(ConfigName) then
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Created: " ..
-                    ConfigName,
-
-                Duration = 3
-
-            })
-
-        else
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Could not create config",
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Load Config",
-
-    Callback = function()
-
-        if LoadConfig(ConfigName) then
-
-            KillAuraEnabled =
-                Settings.KillAura
-
-            ApplyMovement()
-
-
-            if Settings.Fly then
-
-                FlyGui.Enabled =
-                    true
-
-                StartFly()
-
-            else
-
-                FlyGui.Enabled =
-                    false
-
-                StopFly()
-
-            end
-
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Loaded: " ..
-                    ConfigName,
-
-                Duration = 3
-
-            })
-
-        else
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Config not found",
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Save Config",
-
-    Callback = function()
-
-        if SaveConfig(ConfigName) then
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Saved: " ..
-                    ConfigName,
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Delete Config",
-
-    Callback = function()
-
-        if DeleteConfig(ConfigName) then
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Deleted: " ..
-                    ConfigName,
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Rename Config",
-
-    Callback = function()
-
-        if not ConfigExists(
-            ConfigName
-        ) then
-
-            return
-
-        end
-
-
-        local newName =
-            ConfigName .. "_renamed"
-
-
-        if SaveConfig(newName) then
-
-            DeleteConfig(
-                ConfigName
-            )
-
-
-            ConfigName =
-                newName
-
-            Settings.CurrentConfig =
-                newName
-
-
-            Rayfield:Notify({
-
-                Title = "Config",
-
-                Content =
-                    "Renamed to " ..
-                    newName,
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Reset Config",
-
-    Callback = function()
-
-        Settings.ESPEnabled = true
-
-        Settings.BoxESP = true
-        Settings.SkeletonESP = false
-        Settings.HealthBar = true
-        Settings.HealthText = true
-        Settings.NameESP = true
-        Settings.DistanceESP = true
-
-        Settings.ESPColor =
-            Color3.fromRGB(
-                255,
-                255,
-                255
-            )
-
-        Settings.TargetHighlight =
-            true
-
-        Settings.TargetHighlightColor =
-            Color3.fromRGB(
-                255,
-                80,
-                80
-            )
-
-        Settings.KillAura = false
-        Settings.KillAuraRange = 24
-
-        Settings.ShowFOV = true
-        Settings.FOVRadius = 100
-
-        Settings.FOVColor =
-            Color3.fromRGB(
-                255,
-                80,
-                80
-            )
-
-        Settings.KillAuraDelay =
-            0.35
-
-        Settings.Fly = false
-        Settings.FlySpeed = 50
-
-        Settings.Speed = 16
-        Settings.JumpPower = 50
-
-        Settings.Noclip = false
-
-        KillAuraEnabled = false
-
-        FlyGui.Enabled = false
-
-        StopFly()
-
-        ApplyMovement()
-
-
-        Rayfield:Notify({
-
-            Title = "Config",
-
-            Content =
-                "Settings reset",
-
-            Duration = 3
-
-        })
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Import Config",
-
-    Callback = function()
-
-        if not getclipboard then
-
-            Rayfield:Notify({
-
-                Title = "Import",
-
-                Content =
-                    "Clipboard API unavailable",
-
-                Duration = 3
-
-            })
-
-            return
-        end
-
-
-        local success =
-            pcall(function()
-
-                local text =
-                    getclipboard()
-
-
-                local data =
-                    HttpService:JSONDecode(
-                        text
-                    )
-
-
-                ApplySettings(data)
-
-                KillAuraEnabled =
-                    Settings.KillAura
-
-                ApplyMovement()
-
-
-                if Settings.Fly then
-
-                    FlyGui.Enabled =
-                        true
-
-                    StartFly()
-
+local CONFIG_FOLDER = "aesthetic"
+local SelectedConfig = nil
+
+local function getConfigNames()
+    local names = {}
+    if not hasFS() then return names end
+    pcall(function()
+        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
+        -- list all .json except cursors.json
+        -- Rayfield handles its own config; we do manual slot configs
+        if isfolder(CONFIG_FOLDER) then
+            -- we use a manifest
+            local manifestPath = CONFIG_FOLDER .. "/manifest.json"
+            if isfile(manifestPath) then
+                local data = HttpService:JSONDecode(readfile(manifestPath))
+                if type(data) == "table" then
+                    names = data
                 end
-
-            end)
-
-
-        if success then
-
-            Rayfield:Notify({
-
-                Title = "Import",
-
-                Content =
-                    "Config imported",
-
-                Duration = 3
-
-            })
-
-        else
-
-            Rayfield:Notify({
-
-                Title = "Import",
-
-                Content =
-                    "Invalid config",
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateButton({
-
-    Name = "Export Config",
-
-    Callback = function()
-
-        if not setclipboard then
-
-            Rayfield:Notify({
-
-                Title = "Export",
-
-                Content =
-                    "Clipboard API unavailable",
-
-                Duration = 3
-
-            })
-
-            return
-        end
-
-
-        local success =
-            pcall(function()
-
-                local data =
-                    HttpService:JSONEncode(
-                        SerializeSettings()
-                    )
-
-
-                setclipboard(data)
-
-            end)
-
-
-        if success then
-
-            Rayfield:Notify({
-
-                Title = "Export",
-
-                Content =
-                    "Config copied",
-
-                Duration = 3
-
-            })
-
-        end
-
-    end
-})
-
-
-ConfigTab:CreateToggle({
-
-    Name = "Auto Load Config",
-
-    CurrentValue =
-        Settings.AutoLoadConfig,
-
-    Callback = function(value)
-
-        Settings.AutoLoadConfig =
-            value
-
-    end
-})
-
-
---==============================================================
--- AUTO LOAD
---==============================================================
-
-task.spawn(
-    function()
-
-        task.wait(1)
-
-
-        if Settings.AutoLoadConfig then
-
-            if LoadConfig(
-                Settings.CurrentConfig
-            ) then
-
-                KillAuraEnabled =
-                    Settings.KillAura
-
-                ApplyMovement()
-
-
-                if Settings.Fly then
-
-                    FlyGui.Enabled =
-                        true
-
-                    StartFly()
-
-                end
-
             end
         end
+    end)
+    return names
+end
+
+local function saveManifest(list)
+    if not hasFS() then return end
+    pcall(function()
+        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
+        writefile(CONFIG_FOLDER .. "/manifest.json", HttpService:JSONEncode(list))
+    end)
+end
+
+local function buildStateSnapshot()
+    return {
+        ESPEnabled    = State.ESPEnabled,
+        ESPColor      = { State.ESPColor.R, State.ESPColor.G, State.ESPColor.B },
+        FOVEnabled    = State.FOVEnabled,
+        FOVSize       = State.FOVSize,
+        FOVRainbow    = State.FOVRainbow,
+        KillAura      = State.KillAura,
+        KillAuraRange = State.KillAuraRange,
+        AttackDelay   = State.AttackDelay,
+        AimbotEnabled = State.AimbotEnabled,
+        NoFallDamage  = State.NoFallDamage,
+        NoDrowDamage  = State.NoDrowDamage,
+        Speed         = State.Speed,
+        JumpPower     = State.JumpPower,
+    }
+end
+
+local function applySnapshot(snap)
+    if not snap then return end
+    State.ESPEnabled    = snap.ESPEnabled    or false
+    State.FOVEnabled    = snap.FOVEnabled    or false
+    State.FOVSize       = snap.FOVSize       or 120
+    State.FOVRainbow    = snap.FOVRainbow    or false
+    State.KillAura      = snap.KillAura      or false
+    State.KillAuraRange = snap.KillAuraRange or 24
+    State.AttackDelay   = snap.AttackDelay   or 0.35
+    State.AimbotEnabled = snap.AimbotEnabled or false
+    State.NoFallDamage  = snap.NoFallDamage  or false
+    State.NoDrowDamage  = snap.NoDrowDamage  or false
+    State.Speed         = snap.Speed         or 16
+    State.JumpPower     = snap.JumpPower     or 50
+    if snap.ESPColor then
+        State.ESPColor = Color3.new(
+            snap.ESPColor[1],
+            snap.ESPColor[2],
+            snap.ESPColor[3]
+        )
     end
-)
-
+    applyCharacterStats()
+end
 
 --==============================================================
--- SETTINGS UI TAB
+-- TAB: VISUALS
 --==============================================================
 
-SettingsTab:CreateSection(
-    "About Us"
-)
+TabVisuals:CreateToggle({
+    Name         = "ESP",
+    CurrentValue = false,
+    Flag         = "ESP",
+    Callback     = function(v) State.ESPEnabled = v end
+})
 
+TabVisuals:CreateColorPicker({
+    Name         = "ESP Color",
+    Color        = State.ESPColor,
+    Flag         = "ESPColor",
+    Callback     = function(c) State.ESPColor = c end
+})
 
-SettingsTab:CreateParagraph({
+TabVisuals:CreateToggle({
+    Name         = "FOV Circle",
+    CurrentValue = false,
+    Flag         = "FOVEnabled",
+    Callback     = function(v) State.FOVEnabled = v end
+})
 
-    Title =
-        "aesthetic",
+TabVisuals:CreateToggle({
+    Name         = "FOV Rainbow",
+    CurrentValue = false,
+    Flag         = "FOVRainbow",
+    Callback     = function(v) State.FOVRainbow = v end
+})
 
+TabVisuals:CreateColorPicker({
+    Name         = "FOV Color",
+    Color        = State.FOVColor,
+    Flag         = "FOVColor",
+    Callback     = function(c)
+        State.FOVColor = c
+        FOVCircle.Color = c
+    end
+})
+
+TabVisuals:CreateSlider({
+    Name         = "FOV Size",
+    Range        = { 20, 600 },
+    Increment    = 1,
+    Suffix       = " px",
+    CurrentValue = 120,
+    Flag         = "FOVSize",
+    Callback     = function(v) State.FOVSize = v end
+})
+
+--==============================================================
+-- TAB: RAGE
+--==============================================================
+
+TabRage:CreateToggle({
+    Name         = "Kill Aura",
+    CurrentValue = false,
+    Flag         = "KillAura",
+    Callback     = function(v) State.KillAura = v end
+})
+
+TabRage:CreateSlider({
+    Name         = "Kill Aura Range",
+    Range        = { 4, 60 },
+    Increment    = 1,
+    Suffix       = " studs",
+    CurrentValue = 24,
+    Flag         = "KillAuraRange",
+    Callback     = function(v) State.KillAuraRange = v end
+})
+
+TabRage:CreateSlider({
+    Name         = "Attack Delay",
+    Range        = { 5, 200 },
+    Increment    = 1,
+    Suffix       = " ms",
+    CurrentValue = 35,
+    Flag         = "AttackDelay",
+    Callback     = function(v) State.AttackDelay = v / 100 end
+})
+
+TabRage:CreateToggle({
+    Name         = "Aimbot",
+    CurrentValue = false,
+    Flag         = "Aimbot",
+    Callback     = function(v) State.AimbotEnabled = v end
+})
+
+--==============================================================
+-- TAB: MISC
+--==============================================================
+
+TabMisc:CreateToggle({
+    Name         = "No Fall Damage",
+    CurrentValue = false,
+    Flag         = "NoFallDamage",
+    Callback     = function(v) State.NoFallDamage = v end
+})
+
+TabMisc:CreateToggle({
+    Name         = "No Drown Damage",
+    CurrentValue = false,
+    Flag         = "NoDrowDamage",
+    Callback     = function(v) State.NoDrowDamage = v end
+})
+
+TabMisc:CreateToggle({
+    Name         = "Fly  [W/A/S/D + Space/Ctrl or mobile]",
+    CurrentValue = false,
+    Flag         = "Fly",
+    Callback     = function(v)
+        State.FlyEnabled = v
+        if v then
+            enableFly()
+        else
+            disableFly()
+        end
+    end
+})
+
+TabMisc:CreateSlider({
+    Name         = "Jump Power",
+    Range        = { 1, 500 },
+    Increment    = 1,
+    Suffix       = "",
+    CurrentValue = 50,
+    Flag         = "JumpPower",
+    Callback     = function(v)
+        State.JumpPower = v
+        applyCharacterStats()
+    end
+})
+
+TabMisc:CreateSlider({
+    Name         = "Speed",
+    Range        = { 1, 200 },
+    Increment    = 1,
+    Suffix       = "",
+    CurrentValue = 16,
+    Flag         = "Speed",
+    Callback     = function(v)
+        State.Speed = v
+        applyCharacterStats()
+    end
+})
+
+--==============================================================
+-- TAB: CROSSHAIR
+--==============================================================
+
+TabCrosshair:CreateToggle({
+    Name         = "Enable Crosshair",
+    CurrentValue = true,
+    Flag         = "CrosshairEnabled",
+    Callback     = function(v) applyCrosshairVisible(v) end
+})
+
+TabCrosshair:CreateInput({
+    Name                    = "Cursor Asset ID",
+    PlaceholderText         = "1234567890",
+    RemoveTextAfterFocusLost = false,
+    Callback                = function(t) CrosshairState.ImageID = t end
+})
+
+TabCrosshair:CreateSlider({
+    Name         = "Cursor Size",
+    Range        = { 8, 200 },
+    Increment    = 1,
+    Suffix       = " px",
+    CurrentValue = 32,
+    Flag         = "CrosshairSize",
+    Callback     = function(v) applyCrosshairSize(v) end
+})
+
+TabCrosshair:CreateButton({
+    Name     = "Apply Cursor",
+    Callback = function()
+        if CrosshairState.ImageID == "" then
+            Rayfield:Notify({ Title = "Crosshair", Content = "Enter an Asset ID first.", Duration = 3 })
+            return
+        end
+        local ok = applyCrosshairImage(CrosshairState.ImageID)
+        if not ok then
+            Rayfield:Notify({ Title = "Crosshair", Content = "ImageLabel not found in CameraGui.", Duration = 3 })
+            return
+        end
+        applyCrosshairSize(CrosshairState.Size)
+        applyCrosshairVisible(CrosshairState.Enabled)
+        Rayfield:Notify({ Title = "Crosshair", Content = "Cursor applied.", Duration = 2 })
+    end
+})
+
+TabCrosshair:CreateButton({
+    Name     = "Reset Size",
+    Callback = function()
+        applyCrosshairSize(32)
+        Rayfield:Notify({ Title = "Crosshair", Content = "Size reset to 32 px.", Duration = 2 })
+    end
+})
+
+TabCrosshair:CreateDivider()
+
+TabCrosshair:CreateInput({
+    Name                    = "Cursor Name (for saving)",
+    PlaceholderText         = "e.g. Minecraft",
+    RemoveTextAfterFocusLost = false,
+    Callback                = function(t) CrosshairState.CursorName = t end
+})
+
+TabCrosshair:CreateButton({
+    Name     = "Save Cursor",
+    Callback = function()
+        local name = CrosshairState.CursorName:match("^%s*(.-)%s*$")
+        local id   = CrosshairState.ImageID:match("^%s*(.-)%s*$")
+        if name == "" then
+            Rayfield:Notify({ Title = "Crosshair", Content = "Enter a cursor name.", Duration = 3 })
+            return
+        end
+        if id == "" then
+            Rayfield:Notify({ Title = "Crosshair", Content = "Enter an Asset ID.", Duration = 3 })
+            return
+        end
+        CrosshairState.SavedCursors[name] = {
+            id      = id,
+            size    = CrosshairState.Size,
+            enabled = CrosshairState.Enabled,
+        }
+        saveCursors()
+        Rayfield:Notify({ Title = "Cursor Saved", Content = name, Duration = 2 })
+    end
+})
+
+local SelectedCursor = nil
+local CursorDropdown
+
+CursorDropdown = TabCrosshair:CreateDropdown({
+    Name            = "Saved Cursors",
+    Options         = getCursorNames(),
+    CurrentOption   = {},
+    MultipleOptions = false,
+    Callback        = function(opts)
+        local name = opts and opts[1]
+        if not name then return end
+        SelectedCursor = name
+        local data = CrosshairState.SavedCursors[name]
+        if not data then return end
+        CrosshairState.ImageID  = tostring(data.id or "")
+        CrosshairState.Size     = tonumber(data.size) or 32
+        CrosshairState.Enabled  = data.enabled ~= false
+        applyCrosshairImage(CrosshairState.ImageID)
+        applyCrosshairSize(CrosshairState.Size)
+        applyCrosshairVisible(CrosshairState.Enabled)
+        Rayfield:Notify({ Title = "Cursor Loaded", Content = name, Duration = 2 })
+    end
+})
+
+TabCrosshair:CreateButton({
+    Name     = "Delete Selected Cursor",
+    Callback = function()
+        if not SelectedCursor then
+            Rayfield:Notify({ Title = "Crosshair", Content = "Select a cursor first.", Duration = 3 })
+            return
+        end
+        CrosshairState.SavedCursors[SelectedCursor] = nil
+        saveCursors()
+        local prev = SelectedCursor
+        SelectedCursor = nil
+        if CursorDropdown then
+            CursorDropdown:Refresh(getCursorNames())
+        end
+        Rayfield:Notify({ Title = "Cursor Deleted", Content = prev, Duration = 2 })
+    end
+})
+
+--==============================================================
+-- TAB: CONFIG
+--==============================================================
+
+local ConfigDropdown
+local configNames = getConfigNames()
+local ConfigNameInput = ""
+
+local function refreshConfigDropdown()
+    configNames = getConfigNames()
+    if ConfigDropdown then
+        ConfigDropdown:Refresh(configNames)
+    end
+end
+
+ConfigDropdown = TabConfig:CreateDropdown({
+    Name            = "Select Config",
+    Options         = configNames,
+    CurrentOption   = {},
+    MultipleOptions = false,
+    Callback        = function(opts)
+        SelectedConfig = opts and opts[1]
+    end
+})
+
+TabConfig:CreateInput({
+    Name                    = "Config Name",
+    PlaceholderText         = "e.g. my_rage_config",
+    RemoveTextAfterFocusLost = false,
+    Callback                = function(t) ConfigNameInput = t end
+})
+
+TabConfig:CreateButton({
+    Name     = "Create Config",
+    Callback = function()
+        local name = ConfigNameInput:match("^%s*(.-)%s*$")
+        if name == "" then
+            Rayfield:Notify({ Title = "Config", Content = "Enter a config name.", Duration = 3 })
+            return
+        end
+        if not hasFS() then
+            Rayfield:Notify({ Title = "Config", Content = "File system not available.", Duration = 3 })
+            return
+        end
+        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
+        local path = CONFIG_FOLDER .. "/" .. name .. ".json"
+        writefile(path, HttpService:JSONEncode(buildStateSnapshot()))
+        local list = getConfigNames()
+        table.insert(list, name)
+        saveManifest(list)
+        refreshConfigDropdown()
+        Rayfield:Notify({ Title = "Config Created", Content = name, Duration = 2 })
+    end
+})
+
+TabConfig:CreateButton({
+    Name     = "Load Selected Config",
+    Callback = function()
+        if not SelectedConfig then
+            Rayfield:Notify({ Title = "Config", Content = "Select a config first.", Duration = 3 })
+            return
+        end
+        if not hasFS() then return end
+        local path = CONFIG_FOLDER .. "/" .. SelectedConfig .. ".json"
+        if not isfile(path) then
+            Rayfield:Notify({ Title = "Config", Content = "File not found.", Duration = 3 })
+            return
+        end
+        local snap = HttpService:JSONDecode(readfile(path))
+        applySnapshot(snap)
+        Rayfield:Notify({ Title = "Config Loaded", Content = SelectedConfig, Duration = 2 })
+    end
+})
+
+TabConfig:CreateButton({
+    Name     = "Delete Selected Config",
+    Callback = function()
+        if not SelectedConfig then
+            Rayfield:Notify({ Title = "Config", Content = "Select a config first.", Duration = 3 })
+            return
+        end
+        if not hasFS() then return end
+        local path = CONFIG_FOLDER .. "/" .. SelectedConfig .. ".json"
+        if isfile(path) then
+            delfile(path)
+        end
+        local list = getConfigNames()
+        for i, v in ipairs(list) do
+            if v == SelectedConfig then
+                table.remove(list, i)
+                break
+            end
+        end
+        saveManifest(list)
+        local prev = SelectedConfig
+        SelectedConfig = nil
+        refreshConfigDropdown()
+        Rayfield:Notify({ Title = "Config Deleted", Content = prev, Duration = 2 })
+    end
+})
+
+--==============================================================
+-- TAB: ABOUT
+--==============================================================
+
+TabAbout:CreateParagraph({
+    Title   = "aesthetic",
     Content =
-        "Mobile combat / visual test menu."
+        "Version: 1.1.0\n" ..
+        "publix script.\n" ..
+        "Shit code"
 })
 
-
-SettingsTab:CreateButton({
-
-    Name = "Telegram",
-
-    Callback = function()
-
-        if setclipboard then
-
-            setclipboard(
-                "https://t.me/aestheticHubrbx"
-            )
-
-
-            Rayfield:Notify({
-
-                Title =
-                    "Telegram",
-
-                Content =
-                    "Link copied",
-
-                Duration = 2
-
-            })
-
-        end
-
-    end
+TabAbout:CreateParagraph({
+    Title   = "Discord Server",
+    Content = "discord.gg/SZbHupR7W"
 })
 
-
-SettingsTab:CreateButton({
-
-    Name = "Discord",
-
-    Callback = function()
-
-        if setclipboard then
-
-            setclipboard(
-                "https://discord.gg/HN7mqNK2P"
-            )
-
-
-            Rayfield:Notify({
-
-                Title =
-                    "Discord",
-
-                Content =
-                    "Invite copied",
-
-                Duration = 2
-
-            })
-
-        end
-
-    end
+TabAbout:CreateParagraph({
+    Title   = "nope",
+    Content = "aesthetic."
 })
-
 
 --==============================================================
--- INITIALIZE
+-- READY
 --==============================================================
-
-ApplyMovement()
-
 
 Rayfield:Notify({
-
-    Title =
-        "Aesthetic COMBAT",
-
-    Content =
-        "Loaded successfully",
-
-    Duration = 4
-
+    Title    = "aesthetic",
+    Content  = "v1.1.0 — loaded clean.",
+    Duration = 3
 })
 
+print("[aesthetic] loaded — v1.1.0")
