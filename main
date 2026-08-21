@@ -35,6 +35,7 @@ local FallRemote = ReplicatedStorage
 --==============================================================
 
 local State = {
+
     -- Visuals
     ESPEnabled     = false,
     ESPColor       = Color3.fromHex("960000"),
@@ -56,10 +57,15 @@ local State = {
     JumpPower      = 50,
     Speed          = 16,
 
+    -- Mining
+    FastBreak       = false,
+    BreakSpeed      = 0,
+    IgnoreMaterials = {},
+
     -- Internal
     FlyBodyVelocity = nil,
-    FlyBodyGyro    = nil,
-    OldNamecall    = nil,
+    FlyBodyGyro     = nil,
+    OldNamecall     = nil,
 }
 
 --==============================================================
@@ -90,10 +96,10 @@ local Window = Rayfield:CreateWindow({
 --==============================================================
 -- TABS
 --==============================================================
-
 local TabVisuals    = Window:CreateTab("Visuals",   "eye")
 local TabRage       = Window:CreateTab("Rage",      "sword")
 local TabMisc       = Window:CreateTab("Misc",      "settings")
+local TabMining     = Window:CreateTab("Mining",    "pickaxe")
 local TabCrosshair  = Window:CreateTab("Crosshair", "crosshair")
 local TabConfig     = Window:CreateTab("Config",    "save")
 local TabAbout      = Window:CreateTab("About",     "info")
@@ -2239,6 +2245,440 @@ LocalPlayer.CharacterAdded:Connect(function()
 
 end)
 --==============================================================
+-- MINING / FAST BREAK
+--==============================================================
+
+local MiningMaterialService =
+    game:GetService("MaterialService")
+
+local MiningCamera =
+    workspace.CurrentCamera
+
+local ignoredMaterials =
+    State.IgnoreMaterials
+
+local materialList = {}
+
+local fastBreakOldFunction = nil
+local fastBreakHooked = false
+
+--==============================================================
+-- MATERIAL LIST
+--==============================================================
+
+pcall(function()
+
+    local compiled =
+        MiningMaterialService:FindFirstChild(
+            "CompiledMaterials"
+        )
+
+    if compiled then
+
+        for _, mat in ipairs(
+            compiled:GetChildren()
+        ) do
+
+            local name = mat.Name
+
+            if not ignoredMaterials[name] then
+                ignoredMaterials[name] = false
+            end
+
+            table.insert(
+                materialList,
+                name
+            )
+
+        end
+
+    end
+
+end)
+
+table.sort(materialList)
+
+--==============================================================
+-- LOOKED AT PART
+--==============================================================
+
+local function getMiningLookPart()
+
+    local viewport =
+        MiningCamera.ViewportSize
+
+    local ray =
+        MiningCamera:ViewportPointToRay(
+            viewport.X / 2,
+            viewport.Y / 2
+        )
+
+    local params =
+        RaycastParams.new()
+
+    params.FilterType =
+        Enum.RaycastFilterType.Exclude
+
+    local character =
+        LocalPlayer.Character
+
+    if character then
+        params.FilterDescendantsInstances = {
+            character
+        }
+    end
+
+    local result =
+        workspace:Raycast(
+            ray.Origin,
+            ray.Direction * 20,
+            params
+        )
+
+    if result then
+        return result.Instance
+    end
+
+    return nil
+end
+
+--==============================================================
+-- IGNORE CHECK
+--==============================================================
+
+local function isMaterialIgnored(part)
+
+    if not part then
+        return false
+    end
+
+    if not part:IsA("BasePart") then
+        return false
+    end
+
+    local materialVariant =
+        part.MaterialVariant
+
+    if not materialVariant
+        or materialVariant == "" then
+
+        return false
+    end
+
+    return ignoredMaterials[
+        materialVariant
+    ] == true
+end
+
+--==============================================================
+-- HOOK
+--==============================================================
+
+local function enableFastBreak()
+
+    if fastBreakHooked then
+        return
+    end
+
+    if typeof(hookfunction) ~= "function" then
+        return false
+    end
+
+    local ok, getBreakingTime =
+        pcall(function()
+
+            return require(
+                ReplicatedStorage
+                    .Systems
+                    .ItemsSystem
+                    .Libs
+                    .GetBreakingTime
+            )
+
+        end)
+
+    if not ok
+        or typeof(getBreakingTime) ~= "function" then
+
+        return false
+    end
+
+    local original =
+        getBreakingTime
+
+    fastBreakOldFunction =
+        hookfunction(
+            original,
+
+            function(...)
+
+                local part =
+                    getMiningLookPart()
+
+                -- Игнорируемый материал:
+                -- оставляем оригинальное поведение игры.
+                if isMaterialIgnored(part) then
+
+                    return original(...)
+
+                end
+
+                -- Fast Break
+                return State.BreakSpeed
+            end
+        )
+
+    fastBreakHooked = true
+
+    return true
+end
+
+--==============================================================
+-- DISABLE / RESTORE
+--==============================================================
+
+local function disableFastBreak()
+
+    if not fastBreakHooked then
+        return
+    end
+
+    if typeof(hookfunction) ~= "function" then
+        return
+    end
+
+    if fastBreakOldFunction then
+
+        pcall(function()
+
+            local getBreakingTime =
+                require(
+                    ReplicatedStorage
+                        .Systems
+                        .ItemsSystem
+                        .Libs
+                        .GetBreakingTime
+                )
+
+            hookfunction(
+                getBreakingTime,
+                fastBreakOldFunction
+            )
+
+        end)
+
+    end
+
+    fastBreakOldFunction = nil
+    fastBreakHooked = false
+end
+
+--==============================================================
+-- MINING TAB
+--==============================================================
+
+TabMining:CreateSection(
+    "⛏️ | Fast Break"
+)
+
+TabMining:CreateToggle({
+
+    Name = "Fast Break",
+
+    CurrentValue =
+        State.FastBreak,
+
+    Flag = "FastBreakToggle",
+
+    Callback = function(value)
+
+        State.FastBreak =
+            value
+
+        if value then
+
+            local success =
+                enableFastBreak()
+
+            if not success then
+
+                State.FastBreak = false
+
+                Rayfield:Notify({
+                    Title = "Fast Break",
+                    Content =
+                        "GetBreakingTime / hookfunction is unavailable.",
+                    Duration = 3
+                })
+
+            end
+
+        else
+
+            disableFastBreak()
+
+        end
+
+    end
+})
+
+TabMining:CreateInput({
+
+    Name = "Break Speed",
+
+    PlaceholderText =
+        "0 = instant",
+
+    CurrentValue =
+        tostring(State.BreakSpeed),
+
+    RemoveTextAfterFocusLost = false,
+
+    Flag = "InputBreakSpeed",
+
+    Callback = function(text)
+
+        local value =
+            tonumber(text)
+
+        if value ~= nil then
+
+            State.BreakSpeed =
+                math.max(0, value)
+
+        end
+
+    end
+})
+
+--==============================================================
+-- IGNORE MATERIALS
+--==============================================================
+
+TabMining:CreateSection(
+    "🧱 | Ignore Materials"
+)
+
+local IgnoreMaterialDropdown
+
+local function getIgnoredMaterialNames()
+
+    local result = {}
+
+    for name, enabled in pairs(
+        ignoredMaterials
+    ) do
+
+        if enabled then
+            table.insert(
+                result,
+                name
+            )
+        end
+
+    end
+
+    table.sort(result)
+
+    return result
+end
+
+local function refreshIgnoreDropdown()
+
+    if IgnoreMaterialDropdown then
+
+        IgnoreMaterialDropdown:Refresh(
+            materialList
+        )
+
+    end
+
+end
+
+IgnoreMaterialDropdown =
+    TabMining:CreateDropdown({
+
+        Name = "Materials",
+
+        Options =
+            materialList,
+
+        CurrentOption = {},
+
+        MultipleOptions = true,
+
+        Flag = "IgnoredMaterials",
+
+        Callback = function(options)
+
+            -- Сначала всё выключаем
+            for _, name in ipairs(
+                materialList
+            ) do
+
+                ignoredMaterials[name] =
+                    false
+
+            end
+
+            -- Затем включаем выбранные
+            if type(options) == "table" then
+
+                for _, name in ipairs(
+                    options
+                ) do
+
+                    ignoredMaterials[name] =
+                        true
+
+                end
+
+            end
+
+        end
+    })
+
+TabMining:CreateButton({
+
+    Name = "Clear Ignore List",
+
+    Callback = function()
+
+        for _, name in ipairs(
+            materialList
+        ) do
+
+            ignoredMaterials[name] =
+                false
+
+        end
+
+        if IgnoreMaterialDropdown then
+
+            IgnoreMaterialDropdown:Set(
+                {}
+            )
+
+        end
+
+        Rayfield:Notify({
+            Title = "Mining",
+            Content = "Ignore list cleared.",
+            Duration = 2
+        })
+
+    end
+})
+
+TabMining:CreateParagraph({
+
+    Title = "Ignore Materials",
+
+    Content =
+        "Selected materials use the game's original breaking time instead of Fast Break."
+
+})
+--==============================================================
 -- CROSSHAIR SYSTEM
 --==============================================================
 
@@ -2348,80 +2788,307 @@ end
 -- CONFIG SYSTEM
 --==============================================================
 
+--==============================================================
+-- CONFIG SYSTEM
+--==============================================================
+
 local CONFIG_FOLDER = "aesthetic"
 local SelectedConfig = nil
 
 local function getConfigNames()
+
     local names = {}
-    if not hasFS() then return names end
+
+    if not hasFS() then
+        return names
+    end
+
     pcall(function()
-        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
-        -- list all .json except cursors.json
-        -- Rayfield handles its own config; we do manual slot configs
-        if isfolder(CONFIG_FOLDER) then
-            -- we use a manifest
-            local manifestPath = CONFIG_FOLDER .. "/manifest.json"
-            if isfile(manifestPath) then
-                local data = HttpService:JSONDecode(readfile(manifestPath))
-                if type(data) == "table" then
-                    names = data
-                end
-            end
+
+        if not isfolder(CONFIG_FOLDER) then
+            makefolder(CONFIG_FOLDER)
         end
+
+        local manifestPath =
+            CONFIG_FOLDER .. "/manifest.json"
+
+        if not isfile(manifestPath) then
+            return
+        end
+
+        local raw =
+            readfile(manifestPath)
+
+        if raw == "" then
+            return
+        end
+
+        local data =
+            HttpService:JSONDecode(raw)
+
+        if type(data) == "table" then
+            names = data
+        end
+
     end)
+
     return names
 end
 
+
 local function saveManifest(list)
-    if not hasFS() then return end
-    pcall(function()
-        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
-        writefile(CONFIG_FOLDER .. "/manifest.json", HttpService:JSONEncode(list))
+
+    if not hasFS() then
+        return false
+    end
+
+    return pcall(function()
+
+        if not isfolder(CONFIG_FOLDER) then
+            makefolder(CONFIG_FOLDER)
+        end
+
+        writefile(
+            CONFIG_FOLDER .. "/manifest.json",
+            HttpService:JSONEncode(list)
+        )
+
     end)
 end
 
+
+--==============================================================
+-- STATE SNAPSHOT
+--==============================================================
+
 local function buildStateSnapshot()
+
+    local color = State.ESPColor
+
     return {
-        ESPEnabled    = State.ESPEnabled,
-        ESPColor      = { State.ESPColor.R, State.ESPColor.G, State.ESPColor.B },
-        FOVEnabled    = State.FOVEnabled,
-        FOVSize       = State.FOVSize,
-        FOVRainbow    = State.FOVRainbow,
-        KillAura      = State.KillAura,
-        KillAuraRange = State.KillAuraRange,
-        AttackDelay   = State.AttackDelay,
-        AimbotEnabled = State.AimbotEnabled,
-        NoFallDamage  = State.NoFallDamage,
-        NoDrowDamage  = State.NoDrowDamage,
-        Speed         = State.Speed,
-        JumpPower     = State.JumpPower,
+
+        -- Visuals
+        ESPEnabled =
+            State.ESPEnabled,
+
+        ESPColor = {
+            color.R,
+            color.G,
+            color.B
+        },
+
+        FOVEnabled =
+            State.FOVEnabled,
+
+        FOVSize =
+            State.FOVSize,
+
+        FOVRainbow =
+            State.FOVRainbow,
+
+        FOVColor = {
+            State.FOVColor.R,
+            State.FOVColor.G,
+            State.FOVColor.B
+        },
+
+        -- Rage
+        KillAura =
+            State.KillAura,
+
+        KillAuraRange =
+            State.KillAuraRange,
+
+        AttackDelay =
+            State.AttackDelay,
+
+        AimbotEnabled =
+            State.AimbotEnabled,
+
+        -- Misc
+        NoFallDamage =
+            State.NoFallDamage,
+
+        NoDrowDamage =
+            State.NoDrowDamage,
+
+        FlyEnabled =
+            State.FlyEnabled,
+
+        Speed =
+            State.Speed,
+
+        JumpPower =
+            State.JumpPower,
+
+        -- Mining
+        FastBreak =
+            State.FastBreak,
+
+        BreakSpeed =
+            State.BreakSpeed,
+
+        IgnoreMaterials =
+            State.IgnoreMaterials,
     }
 end
 
-local function applySnapshot(snap)
-    if not snap then return end
-    State.ESPEnabled    = snap.ESPEnabled    or false
-    State.FOVEnabled    = snap.FOVEnabled    or false
-    State.FOVSize       = snap.FOVSize       or 120
-    State.FOVRainbow    = snap.FOVRainbow    or false
-    State.KillAura      = snap.KillAura      or false
-    State.KillAuraRange = snap.KillAuraRange or 24
-    State.AttackDelay   = snap.AttackDelay   or 0.35
-    State.AimbotEnabled = snap.AimbotEnabled or false
-    State.NoFallDamage  = snap.NoFallDamage  or false
-    State.NoDrowDamage  = snap.NoDrowDamage  or false
-    State.Speed         = snap.Speed         or 16
-    State.JumpPower     = snap.JumpPower     or 50
-    if snap.ESPColor then
-        State.ESPColor = Color3.new(
-            snap.ESPColor[1],
-            snap.ESPColor[2],
-            snap.ESPColor[3]
-        )
-    end
-    applyCharacterStats()
-end
 
+--==============================================================
+-- APPLY SNAPSHOT
+--==============================================================
+
+local function applySnapshot(snap)
+
+    if type(snap) ~= "table" then
+        return
+    end
+
+    --==========================================================
+    -- VISUALS
+    --==========================================================
+
+    State.ESPEnabled =
+        snap.ESPEnabled == true
+
+    State.FOVEnabled =
+        snap.FOVEnabled == true
+
+    State.FOVSize =
+        tonumber(snap.FOVSize) or 120
+
+    State.FOVRainbow =
+        snap.FOVRainbow == true
+
+
+    if type(snap.ESPColor) == "table"
+        and snap.ESPColor[1]
+        and snap.ESPColor[2]
+        and snap.ESPColor[3] then
+
+        State.ESPColor =
+            Color3.new(
+                tonumber(snap.ESPColor[1]) or 1,
+                tonumber(snap.ESPColor[2]) or 1,
+                tonumber(snap.ESPColor[3]) or 1
+            )
+
+    end
+
+
+    if type(snap.FOVColor) == "table"
+        and snap.FOVColor[1]
+        and snap.FOVColor[2]
+        and snap.FOVColor[3] then
+
+        State.FOVColor =
+            Color3.new(
+                tonumber(snap.FOVColor[1]) or 1,
+                tonumber(snap.FOVColor[2]) or 1,
+                tonumber(snap.FOVColor[3]) or 1
+            )
+
+    end
+
+
+    --==========================================================
+    -- RAGE
+    --==========================================================
+
+    State.KillAura =
+        snap.KillAura == true
+
+    State.KillAuraRange =
+        tonumber(snap.KillAuraRange) or 24
+
+    State.AttackDelay =
+        tonumber(snap.AttackDelay) or 0.35
+
+    State.AimbotEnabled =
+        snap.AimbotEnabled == true
+
+
+    --==========================================================
+    -- MISC
+    --==========================================================
+
+    State.NoFallDamage =
+        snap.NoFallDamage == true
+
+    State.NoDrowDamage =
+        snap.NoDrowDamage == true
+
+    State.FlyEnabled =
+        snap.FlyEnabled == true
+
+    State.Speed =
+        tonumber(snap.Speed) or 16
+
+    State.JumpPower =
+        tonumber(snap.JumpPower) or 50
+
+
+    --==========================================================
+    -- MINING
+    --==========================================================
+
+    State.FastBreak =
+        snap.FastBreak == true
+
+    State.BreakSpeed =
+        tonumber(snap.BreakSpeed) or 0
+
+
+    --==========================================================
+    -- IGNORE MATERIALS
+    --==========================================================
+
+    for name in pairs(State.IgnoreMaterials) do
+        State.IgnoreMaterials[name] = nil
+    end
+
+    if type(snap.IgnoreMaterials) == "table" then
+
+        for name, enabled in pairs(
+            snap.IgnoreMaterials
+        ) do
+
+            State.IgnoreMaterials[name] =
+                enabled == true
+
+        end
+    end
+
+
+    --==========================================================
+    -- APPLY CHARACTER
+    --==========================================================
+
+    applyCharacterStats()
+
+
+    --==========================================================
+    -- FAST BREAK
+    --==========================================================
+
+    if State.FastBreak then
+        enableFastBreak()
+    else
+        disableFastBreak()
+    end
+
+
+    --==========================================================
+    -- FLY
+    --==========================================================
+
+    if State.FlyEnabled then
+        enableFly()
+    else
+        disableFly()
+    end
+
+end
 --==============================================================
 -- TAB: VISUALS
 --==============================================================
