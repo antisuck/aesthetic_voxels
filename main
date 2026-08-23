@@ -1,34 +1,126 @@
-
+--==============================================================
+-- AESTHETIC
+-- FULL FIXED VERSION
+-- v1.2.0
+--==============================================================
 
 --==============================================================
 -- SERVICES
 --==============================================================
 
-local Players         = game:GetService("Players")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService      = game:GetService("RunService")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService     = game:GetService("HttpService")
-local TweenService    = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local MaterialService = game:GetService("MaterialService")
 
-local LocalPlayer     = Players.LocalPlayer
-local Camera          = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local Camera = workspace.CurrentCamera
 
 --==============================================================
--- REMOTE PATHS
+-- CAMERA UPDATE
 --==============================================================
 
-local AttackRemote = ReplicatedStorage
-    :WaitForChild("Systems")
-    :WaitForChild("ActionsSystem")
-    :WaitForChild("Network")
-    :WaitForChild("Attack")
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    Camera = workspace.CurrentCamera
+end)
 
-local FallRemote = ReplicatedStorage
-    :WaitForChild("Systems")
-    :WaitForChild("CombatSystem")
-    :WaitForChild("Network")
-    :WaitForChild("FallDamage")
+--==============================================================
+-- SAFE HELPERS
+--==============================================================
+
+local function safeDestroy(obj)
+    if obj then
+        pcall(function()
+            obj:Destroy()
+        end)
+    end
+end
+
+local function getRoot(character)
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChild("HumanoidRootPart")
+        or character.PrimaryPart
+end
+
+local function getHumanoid(character)
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function getCharacterPosition(character)
+    if not character then
+        return nil
+    end
+
+    local root = getRoot(character)
+
+    if root then
+        return root.Position
+    end
+
+    local ok, pivot = pcall(function()
+        return character:GetPivot()
+    end)
+
+    if ok and pivot then
+        return pivot.Position
+    end
+
+    return nil
+end
+
+--==============================================================
+-- REMOTES
+--==============================================================
+
+local Systems = ReplicatedStorage:FindFirstChild("Systems")
+
+local AttackRemote
+local FallRemote
+
+if Systems then
+
+    local ActionsSystem =
+        Systems:FindFirstChild("ActionsSystem")
+
+    local CombatSystem =
+        Systems:FindFirstChild("CombatSystem")
+
+    if ActionsSystem then
+
+        local Network =
+            ActionsSystem:FindFirstChild("Network")
+
+        if Network then
+            AttackRemote =
+                Network:FindFirstChild("Attack")
+        end
+
+    end
+
+    if CombatSystem then
+
+        local Network =
+            CombatSystem:FindFirstChild("Network")
+
+        if Network then
+            FallRemote =
+                Network:FindFirstChild("FallDamage")
+        end
+
+    end
+end
 
 --==============================================================
 -- STATE
@@ -37,139 +129,235 @@ local FallRemote = ReplicatedStorage
 local State = {
 
     -- Visuals
-    ESPEnabled     = false,
-    ESPColor       = Color3.fromHex("960000"),
-    FOVEnabled     = false,
-    FOVColor       = Color3.fromHex("FFFFFF"),
-    FOVRainbow     = false,
-    FOVSize        = 120,
+    ESPEnabled = false,
+    ESPColor = Color3.fromHex("960000"),
+
+    FOVEnabled = false,
+    FOVColor = Color3.fromRGB(255, 255, 255),
+    FOVRainbow = false,
+    FOVSize = 120,
 
     -- Rage
-    KillAura       = false,
-    KillAuraRange  = 24,
-    AttackDelay    = 0.35,
-    AimbotEnabled  = false,
+    KillAura = false,
+    KillAuraRange = 24,
+    AttackDelay = 0.35,
+    AimbotEnabled = false,
+    KillAuraFov = true, 
+    JumpAttack = false,
 
     -- Misc
-    NoFallDamage   = false,
-    NoDrowDamage   = false,
-    FlyEnabled     = false,
-    JumpPower      = 50,
-    Speed          = 16,
+    NoFallDamage = false,
+    NoDrowDamage = false,
+
+    FlyEnabled = false,
+    FlySpeed = 16,
+
+    JumpPower = 27,
+    Speed = 16,
 
     -- Mining
-    FastBreak       = false,
-    BreakSpeed      = 0,
+    FastBreak = false,
+    BreakSpeed = 0,
     IgnoreMaterials = {},
 
     -- Internal
     FlyBodyVelocity = nil,
-    FlyBodyGyro     = nil,
-    OldNamecall     = nil,
+    FlyBodyGyro = nil,
+
+    OldNamecall = nil,
 }
 
 --==============================================================
 -- RAYFIELD
 --==============================================================
 
-local Rayfield = loadstring(game:HttpGet(
-    "https://sirius.menu/rayfield"
-))()
+local Rayfield
+
+do
+    local success, result = pcall(function()
+        return loadstring(
+            game:HttpGet(
+                "https://sirius.menu/rayfield"
+            )
+        )()
+    end)
+
+    if not success or not result then
+        warn("[aesthetic] Failed to load Rayfield")
+        return
+    end
+
+    Rayfield = result
+end
+
+--==============================================================
+-- WINDOW
+--==============================================================
 
 local Window = Rayfield:CreateWindow({
-    Name             = "aesthetic",
-    LoadingTitle     = "aesthetic",
-    LoadingSubtitle  = "v1.1.0",
+
+    Name = "aesthetic",
+
+    LoadingTitle = "aesthetic",
+
+    LoadingSubtitle = "v1.1.1",
+
     ConfigurationSaving = {
-        Enabled  = true,
+        Enabled = true,
         FolderName = "aesthetic",
         FileName = "config"
     },
+
     Discord = {
-        Enabled     = false,
-        Invite      = "",
+        Enabled = false,
+        Invite = "",
         RememberJoined = false
     },
+
     KeySystem = false
 })
 
 --==============================================================
 -- TABS
 --==============================================================
-local TabVisuals    = Window:CreateTab("Visuals",   "eye")
-local TabRage       = Window:CreateTab("Rage",      "sword")
-local TabMisc       = Window:CreateTab("Misc",      "settings")
-local TabMining     = Window:CreateTab("Mining",    "pickaxe")
-local TabCrosshair  = Window:CreateTab("Crosshair", "crosshair")
-local TabConfig     = Window:CreateTab("Config",    "save")
-local TabAbout      = Window:CreateTab("About",     "info")
+
+local TabVisuals =
+    Window:CreateTab("Visuals", "eye")
+
+local TabRage =
+    Window:CreateTab("Rage", "sword")
+
+local TabMisc =
+    Window:CreateTab("Misc", "settings")
+
+local TabMining =
+    Window:CreateTab("Mining", "pickaxe")
+
+local TabCrosshair =
+    Window:CreateTab("Crosshair", "crosshair")
+
+local TabConfig =
+    Window:CreateTab("Config", "save")
+
+local TabAbout =
+    Window:CreateTab("About", "info")
 
 --==============================================================
--- HELPERS
+-- TARGET FUNCTIONS
 --==============================================================
 
-local function getRoot(character)
-    if not character then return nil end
-    return character:FindFirstChild("HumanoidRootPart")
-        or character.PrimaryPart
-end
+--==============================================================
+-- KILL AURA TARGET
+--==============================================================
 
-local function getHumanoid(character)
-    if not character then return nil end
-    return character:FindFirstChildOfClass("Humanoid")
+local function isTargetInsideFOV(character)
+
+    if not State.KillAuraFOV then
+        return true
+    end
+
+    if not Camera then
+        return false
+    end
+
+    local aimPart =
+        getAimPart(character)
+
+    if not aimPart then
+        return false
+    end
+
+    local viewport =
+        Camera.ViewportSize
+
+    local center =
+        Vector2.new(
+            viewport.X / 2,
+            viewport.Y / 2
+        )
+
+    local screenPosition,
+        onScreen =
+        Camera:WorldToViewportPoint(
+            aimPart.Position
+        )
+
+    if not onScreen then
+        return false
+    end
+
+    if screenPosition.Z <= 0 then
+        return false
+    end
+
+    local screenDistance =
+        (
+            Vector2.new(
+                screenPosition.X,
+                screenPosition.Y
+            )
+            - center
+        ).Magnitude
+
+    return screenDistance <= State.FOVSize
 end
 
 local function getNearestTarget()
-    local myChar = LocalPlayer.Character
-    local myRoot = getRoot(myChar)
-    if not myRoot then return nil end
 
-    local nearest, nearestDist = nil, State.KillAuraRange
+    local myCharacter =
+        LocalPlayer.Character
 
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local char = p.Character
-            local root = getRoot(char)
-            local hum  = getHumanoid(char)
-            if root and hum and hum.Health > 0 then
-                local dist = (root.Position - myRoot.Position).Magnitude
-                if dist <= nearestDist then
-                    nearest     = char
-                    nearestDist = dist
-                end
-            end
-        end
+    local myRoot =
+        getRoot(myCharacter)
+
+    if not myRoot then
+        return nil
     end
 
-    return nearest
-end
+    local nearest = nil
+    local nearestDistance =
+        State.KillAuraRange
 
-local function getAimbotTarget()
-    local myChar = LocalPlayer.Character
-    local myRoot = getRoot(myChar)
-    if not myRoot then return nil end
+    for _, player in ipairs(
+        Players:GetPlayers()
+    ) do
 
-    local nearest, nearestDist = nil, State.FOVSize
+        if player ~= LocalPlayer then
 
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local char = p.Character
-            local root = getRoot(char)
-            local hum  = getHumanoid(char)
-            if root and hum and hum.Health > 0 then
-                local screenPos, onScreen =
-                    Camera:WorldToViewportPoint(root.Position)
-                if onScreen then
-                    local center = Vector2.new(
-                        Camera.ViewportSize.X / 2,
-                        Camera.ViewportSize.Y / 2
-                    )
-                    local dist2d = (
-                        Vector2.new(screenPos.X, screenPos.Y) - center
+            local character =
+                player.Character
+
+            local root =
+                getRoot(character)
+
+            local humanoid =
+                getHumanoid(character)
+
+            if root
+                and humanoid
+                and humanoid.Health > 0 then
+
+                local distance =
+                    (
+                        root.Position
+                        - myRoot.Position
                     ).Magnitude
-                    if dist2d <= nearestDist then
-                        nearest     = char
-                        nearestDist = dist2d
+
+                if distance <= nearestDistance then
+
+                    --==================================================
+                    -- FOV CHECK
+                    --==================================================
+
+                    if isTargetInsideFOV(
+                        character
+                    ) then
+
+                        nearest =
+                            character
+
+                        nearestDistance =
+                            distance
                     end
                 end
             end
@@ -180,29 +368,160 @@ local function getAimbotTarget()
 end
 
 --==============================================================
--- ESP
+-- AIM PART
 --==============================================================
 
+local function getAimPart(character)
+
+    if not character then
+        return nil
+    end
+
+    local head =
+        character:FindFirstChild("Head")
+
+    if head and head:IsA("BasePart") then
+        return head
+    end
+
+    local root =
+        character:FindFirstChild("HumanoidRootPart")
+
+    if root and root:IsA("BasePart") then
+        return root
+    end
+
+    if character.PrimaryPart
+        and character.PrimaryPart:IsA("BasePart") then
+
+        return character.PrimaryPart
+    end
+
+    for _, obj in ipairs(
+        character:GetDescendants()
+    ) do
+
+        if obj:IsA("BasePart")
+            and obj.Transparency < 1 then
+
+            return obj
+        end
+    end
+
+    return nil
+end
+
 --==============================================================
--- HYBRID ESP
--- Character Parts Bounding Box
--- Fallback: LastPosition
+-- AIMBOT TARGET
+--==============================================================
+
+local function getAimbotTarget()
+
+    if not Camera then
+        return nil
+    end
+
+    local viewport =
+        Camera.ViewportSize
+
+    local center =
+        Vector2.new(
+            viewport.X / 2,
+            viewport.Y / 2
+        )
+
+    local nearestPart = nil
+    local nearestDistance =
+        State.FOVSize
+
+    for _, player in ipairs(
+        Players:GetPlayers()
+    ) do
+
+        if player == LocalPlayer then
+            continue
+        end
+
+        local character =
+            player.Character
+
+        if not character then
+            continue
+        end
+
+        local humanoid =
+            getHumanoid(character)
+
+        if humanoid
+            and humanoid.Health <= 0 then
+
+            continue
+        end
+
+        local aimPart =
+            getAimPart(character)
+
+        if not aimPart then
+            continue
+        end
+
+        local screenPosition,
+              onScreen =
+            Camera:WorldToViewportPoint(
+                aimPart.Position
+            )
+
+        if not onScreen then
+            continue
+        end
+
+        if screenPosition.Z <= 0 then
+            continue
+        end
+
+        local screenDistance =
+            (
+                Vector2.new(
+                    screenPosition.X,
+                    screenPosition.Y
+                )
+                - center
+            ).Magnitude
+
+        if screenDistance <= nearestDistance then
+
+            nearestDistance =
+                screenDistance
+
+            nearestPart =
+                aimPart
+        end
+    end
+
+    return nearestPart
+end
+
+--==============================================================
+-- ESP
 --==============================================================
 
 local ESPObjects = {}
 
 local ESPSettings = {
+
     MaxDistance = 2500,
 
-    BoxColor = State.ESPColor,
-    TextColor = Color3.fromRGB(255, 255, 255),
+    TextColor =
+        Color3.fromRGB(
+            255,
+            255,
+            255
+        ),
 
     BoxThickness = 2,
 
-    -- Плавность позиции ESP
     Smoothness = 0.25,
 
-    -- Сколько времени терпим временную потерю Character
     GraceTime = 0.15,
 }
 
@@ -212,10 +531,18 @@ local ESPSettings = {
 
 local ESPFolder =
     workspace:FindFirstChild("HybridESP")
-    or Instance.new("Folder")
 
-ESPFolder.Name = "HybridESP"
-ESPFolder.Parent = workspace
+if not ESPFolder then
+
+    ESPFolder =
+        Instance.new("Folder")
+
+    ESPFolder.Name =
+        "HybridESP"
+
+    ESPFolder.Parent =
+        workspace
+end
 
 --==============================================================
 -- HEALTH COLOR
@@ -224,18 +551,33 @@ ESPFolder.Parent = workspace
 local function getESPHealthColor(percent)
 
     if percent > 0.60 then
-        return Color3.fromRGB(60, 255, 110)
+
+        return Color3.fromRGB(
+            60,
+            255,
+            110
+        )
 
     elseif percent > 0.30 then
-        return Color3.fromRGB(255, 220, 60)
+
+        return Color3.fromRGB(
+            255,
+            220,
+            60
+        )
 
     else
-        return Color3.fromRGB(255, 60, 60)
+
+        return Color3.fromRGB(
+            255,
+            60,
+            60
+        )
     end
 end
 
 --==============================================================
--- GET CHARACTER PARTS
+-- CHARACTER PARTS
 --==============================================================
 
 local function getCharacterParts(character)
@@ -246,13 +588,17 @@ local function getCharacterParts(character)
 
     local parts = {}
 
-    for _, obj in ipairs(character:GetDescendants()) do
+    for _, obj in ipairs(
+        character:GetDescendants()
+    ) do
 
         if obj:IsA("BasePart")
             and obj.Transparency < 1 then
 
-            table.insert(parts, obj)
-
+            table.insert(
+                parts,
+                obj
+            )
         end
     end
 
@@ -260,12 +606,21 @@ local function getCharacterParts(character)
 end
 
 --==============================================================
--- GET SCREEN BOUNDING BOX
+-- BOUNDING BOX
 --==============================================================
 
 local function getHybridBoundingBox(character)
 
-    local parts = getCharacterParts(character)
+    if not character then
+        return nil
+    end
+
+    if not Camera then
+        return nil
+    end
+
+    local parts =
+        getCharacterParts(character)
 
     if #parts == 0 then
         return nil
@@ -278,58 +633,108 @@ local function getHybridBoundingBox(character)
     local maxY = -math.huge
 
     local visiblePoints = 0
+    local totalPoints = 0
 
     for _, part in ipairs(parts) do
 
-        local cf = part.CFrame
-        local size = part.Size / 2
+        local cf =
+            part.CFrame
 
-        -- Все 8 углов BasePart
+        local half =
+            part.Size / 2
+
         local corners = {
-            Vector3.new(-size.X, -size.Y, -size.Z),
-            Vector3.new(-size.X, -size.Y,  size.Z),
-            Vector3.new(-size.X,  size.Y, -size.Z),
-            Vector3.new(-size.X,  size.Y,  size.Z),
 
-            Vector3.new( size.X, -size.Y, -size.Z),
-            Vector3.new( size.X, -size.Y,  size.Z),
-            Vector3.new( size.X,  size.Y, -size.Z),
-            Vector3.new( size.X,  size.Y,  size.Z),
+            Vector3.new(
+                -half.X,
+                -half.Y,
+                -half.Z
+            ),
+
+            Vector3.new(
+                -half.X,
+                -half.Y,
+                half.Z
+            ),
+
+            Vector3.new(
+                -half.X,
+                half.Y,
+                -half.Z
+            ),
+
+            Vector3.new(
+                -half.X,
+                half.Y,
+                half.Z
+            ),
+
+            Vector3.new(
+                half.X,
+                -half.Y,
+                -half.Z
+            ),
+
+            Vector3.new(
+                half.X,
+                -half.Y,
+                half.Z
+            ),
+
+            Vector3.new(
+                half.X,
+                half.Y,
+                -half.Z
+            ),
+
+            Vector3.new(
+                half.X,
+                half.Y,
+                half.Z
+            )
         }
 
         for _, corner in ipairs(corners) do
 
-            local worldPosition =
-                cf:PointToWorldSpace(corner)
+            totalPoints += 1
 
-            local screenPosition, onScreen =
+            local worldPosition =
+                cf:PointToWorldSpace(
+                    corner
+                )
+
+            local screenPosition =
                 Camera:WorldToViewportPoint(
                     worldPosition
                 )
 
-            if onScreen and screenPosition.Z > 0 then
+            if screenPosition.Z > 0 then
 
                 visiblePoints += 1
 
-                minX = math.min(
-                    minX,
-                    screenPosition.X
-                )
+                minX =
+                    math.min(
+                        minX,
+                        screenPosition.X
+                    )
 
-                minY = math.min(
-                    minY,
-                    screenPosition.Y
-                )
+                minY =
+                    math.min(
+                        minY,
+                        screenPosition.Y
+                    )
 
-                maxX = math.max(
-                    maxX,
-                    screenPosition.X
-                )
+                maxX =
+                    math.max(
+                        maxX,
+                        screenPosition.X
+                    )
 
-                maxY = math.max(
-                    maxY,
-                    screenPosition.Y
-                )
+                maxY =
+                    math.max(
+                        maxY,
+                        screenPosition.Y
+                    )
             end
         end
     end
@@ -344,20 +749,27 @@ local function getHybridBoundingBox(character)
     local height =
         maxY - minY
 
-    -- Защита от кривых/нулевых размеров
-    if width < 2 or height < 2 then
+    if width < 2
+        or height < 2 then
+
         return nil
     end
 
     return {
+
         X = minX,
+
         Y = minY,
 
         Width = width,
+
         Height = height,
 
-        CenterX = (minX + maxX) / 2,
-        CenterY = (minY + maxY) / 2,
+        CenterX =
+            (minX + maxX) / 2,
+
+        CenterY =
+            (minY + maxY) / 2
     }
 end
 
@@ -376,20 +788,23 @@ local function createESP(player)
     end
 
     --==========================================================
-    -- INVISIBLE POSITION PART
-    -- Used for LastPosition fallback
+    -- FALLBACK PART
     --==========================================================
 
-    local part = Instance.new("Part")
+    local part =
+        Instance.new("Part")
 
     part.Name =
         player.Name .. "_HybridESP"
 
     part.Size =
-        Vector3.new(2, 5, 1)
+        Vector3.new(
+            2,
+            5,
+            1
+        )
 
     part.Transparency = 1
-
     part.Anchored = true
 
     part.CanCollide = false
@@ -399,9 +814,14 @@ local function createESP(player)
     part.CastShadow = false
 
     part.Position =
-        Vector3.new(0, -9999, 0)
+        Vector3.new(
+            0,
+            -9999,
+            0
+        )
 
-    part.Parent = ESPFolder
+    part.Parent =
+        ESPFolder
 
     --==========================================================
     -- BILLBOARD
@@ -416,14 +836,22 @@ local function createESP(player)
     gui.LightInfluence = 0
 
     gui.Size =
-        UDim2.fromOffset(150, 150)
+        UDim2.fromOffset(
+            150,
+            150
+        )
 
     gui.StudsOffsetWorldSpace =
-        Vector3.new(0, 2.8, 0)
+        Vector3.new(
+            0,
+            2.8,
+            0
+        )
 
     gui.Enabled = false
 
-    gui.Parent = part
+    gui.Parent =
+        part
 
     --==========================================================
     -- CONTAINER
@@ -432,14 +860,17 @@ local function createESP(player)
     local container =
         Instance.new("Frame")
 
-    container.Name = "Container"
-
     container.Size =
-        UDim2.fromScale(1, 1)
+        UDim2.fromScale(
+            1,
+            1
+        )
 
-    container.BackgroundTransparency = 1
+    container.BackgroundTransparency =
+        1
 
-    container.Parent = gui
+    container.Parent =
+        gui
 
     --==========================================================
     -- NAME
@@ -448,10 +879,11 @@ local function createESP(player)
     local nameText =
         Instance.new("TextLabel")
 
-    nameText.Name = "Name"
-
     nameText.AnchorPoint =
-        Vector2.new(0.5, 0)
+        Vector2.new(
+            0.5,
+            0
+        )
 
     nameText.Position =
         UDim2.new(
@@ -469,25 +901,33 @@ local function createESP(player)
             18
         )
 
-    nameText.BackgroundTransparency = 1
+    nameText.BackgroundTransparency =
+        1
 
     nameText.TextColor3 =
         ESPSettings.TextColor
 
     nameText.TextStrokeColor3 =
-        Color3.new(0, 0, 0)
+        Color3.new(
+            0,
+            0,
+            0
+        )
 
-    nameText.TextStrokeTransparency = 0
+    nameText.TextStrokeTransparency =
+        0
 
     nameText.Font =
         Enum.Font.GothamBold
 
-    nameText.TextSize = 13
+    nameText.TextSize =
+        13
 
     nameText.Text =
         player.DisplayName
 
-    nameText.Parent = container
+    nameText.Parent =
+        container
 
     --==========================================================
     -- BOX
@@ -496,10 +936,11 @@ local function createESP(player)
     local box =
         Instance.new("Frame")
 
-    box.Name = "Box"
-
     box.AnchorPoint =
-        Vector2.new(0.5, 0)
+        Vector2.new(
+            0.5,
+            0
+        )
 
     box.Position =
         UDim2.new(
@@ -515,16 +956,17 @@ local function createESP(player)
             70
         )
 
-    box.BackgroundTransparency = 1
+    box.BackgroundTransparency =
+        1
 
-    box.BorderSizePixel = 0
+    box.BorderSizePixel =
+        0
 
-    box.Parent = container
+    box.Parent =
+        container
 
     local boxStroke =
         Instance.new("UIStroke")
-
-    boxStroke.Name = "Stroke"
 
     boxStroke.Thickness =
         ESPSettings.BoxThickness
@@ -532,7 +974,8 @@ local function createESP(player)
     boxStroke.Color =
         State.ESPColor
 
-    boxStroke.Parent = box
+    boxStroke.Parent =
+        box
 
     --==========================================================
     -- HEALTH BACKGROUND
@@ -540,9 +983,6 @@ local function createESP(player)
 
     local healthBackground =
         Instance.new("Frame")
-
-    healthBackground.Name =
-        "HealthBackground"
 
     healthBackground.Position =
         UDim2.new(
@@ -568,23 +1008,20 @@ local function createESP(player)
     healthBackground.BackgroundTransparency =
         0.15
 
-    healthBackground.BorderSizePixel = 0
+    healthBackground.BorderSizePixel =
+        0
 
     healthBackground.Parent =
         container
 
-    --==========================================================
-    -- HEALTH BAR
-    --==========================================================
-
     local healthBar =
         Instance.new("Frame")
 
-    healthBar.Name =
-        "HealthBar"
-
     healthBar.AnchorPoint =
-        Vector2.new(0, 1)
+        Vector2.new(
+            0,
+            1
+        )
 
     healthBar.Position =
         UDim2.new(
@@ -609,20 +1046,18 @@ local function createESP(player)
             110
         )
 
-    healthBar.BorderSizePixel = 0
+    healthBar.BorderSizePixel =
+        0
 
     healthBar.Parent =
         healthBackground
 
     --==========================================================
-    -- HP TEXT
+    -- HP
     --==========================================================
 
     local hpText =
         Instance.new("TextLabel")
-
-    hpText.Name =
-        "HealthText"
 
     hpText.Position =
         UDim2.new(
@@ -638,7 +1073,8 @@ local function createESP(player)
             18
         )
 
-    hpText.BackgroundTransparency = 1
+    hpText.BackgroundTransparency =
+        1
 
     hpText.TextColor3 =
         Color3.fromRGB(
@@ -648,14 +1084,20 @@ local function createESP(player)
         )
 
     hpText.TextStrokeColor3 =
-        Color3.new(0, 0, 0)
+        Color3.new(
+            0,
+            0,
+            0
+        )
 
-    hpText.TextStrokeTransparency = 0
+    hpText.TextStrokeTransparency =
+        0
 
     hpText.Font =
         Enum.Font.GothamBold
 
-    hpText.TextSize = 11
+    hpText.TextSize =
+        11
 
     hpText.TextXAlignment =
         Enum.TextXAlignment.Left
@@ -673,11 +1115,11 @@ local function createESP(player)
     local distanceText =
         Instance.new("TextLabel")
 
-    distanceText.Name =
-        "Distance"
-
     distanceText.AnchorPoint =
-        Vector2.new(0.5, 0)
+        Vector2.new(
+            0.5,
+            0
+        )
 
     distanceText.Position =
         UDim2.new(
@@ -695,7 +1137,8 @@ local function createESP(player)
             18
         )
 
-    distanceText.BackgroundTransparency = 1
+    distanceText.BackgroundTransparency =
+        1
 
     distanceText.TextColor3 =
         Color3.fromRGB(
@@ -705,14 +1148,20 @@ local function createESP(player)
         )
 
     distanceText.TextStrokeColor3 =
-        Color3.new(0, 0, 0)
+        Color3.new(
+            0,
+            0,
+            0
+        )
 
-    distanceText.TextStrokeTransparency = 0
+    distanceText.TextStrokeTransparency =
+        0
 
     distanceText.Font =
         Enum.Font.Gotham
 
-    distanceText.TextSize = 11
+    distanceText.TextSize =
+        11
 
     distanceText.Text =
         "? Stud"
@@ -748,14 +1197,209 @@ local function createESP(player)
         DistanceText =
             distanceText,
 
+        ScreenGui = nil,
+
+        ScreenBox = nil,
+
+        ScreenStroke = nil,
+
+        ScreenName = nil,
+
+        ScreenHealth = nil,
+
+        ScreenDistance = nil,
+
         LastPos = nil,
 
         LastValidTime = 0,
 
-        Mode = "None",
-
-        Tween = nil,
+        Mode = "None"
     }
+end
+
+--==============================================================
+-- SCREEN ESP
+--==============================================================
+
+local function createScreenESP(esp)
+
+    if esp.ScreenGui then
+        return
+    end
+
+    local screenGui =
+        Instance.new("ScreenGui")
+
+    screenGui.Name =
+        "HybridESP"
+
+    screenGui.IgnoreGuiInset =
+        true
+
+    screenGui.ResetOnSpawn =
+        false
+
+    screenGui.DisplayOrder =
+        999998
+
+    screenGui.Parent =
+        PlayerGui
+
+    -- BOX
+
+    local frame =
+        Instance.new("Frame")
+
+    frame.BackgroundTransparency =
+        1
+
+    frame.BorderSizePixel =
+        0
+
+    frame.Parent =
+        screenGui
+
+    local stroke =
+        Instance.new("UIStroke")
+
+    stroke.Thickness =
+        ESPSettings.BoxThickness
+
+    stroke.Color =
+        State.ESPColor
+
+    stroke.Parent =
+        frame
+
+    -- NAME
+
+    local name =
+        Instance.new("TextLabel")
+
+    name.AnchorPoint =
+        Vector2.new(
+            0.5,
+            1
+        )
+
+    name.BackgroundTransparency =
+        1
+
+    name.TextColor3 =
+        ESPSettings.TextColor
+
+    name.TextStrokeColor3 =
+        Color3.new(
+            0,
+            0,
+            0
+        )
+
+    name.TextStrokeTransparency =
+        0
+
+    name.Font =
+        Enum.Font.GothamBold
+
+    name.TextSize =
+        13
+
+    name.Parent =
+        screenGui
+
+    -- HEALTH
+
+    local health =
+        Instance.new("TextLabel")
+
+    health.AnchorPoint =
+        Vector2.new(
+            0,
+            0.5
+        )
+
+    health.BackgroundTransparency =
+        1
+
+    health.TextStrokeColor3 =
+        Color3.new(
+            0,
+            0,
+            0
+        )
+
+    health.TextStrokeTransparency =
+        0
+
+    health.Font =
+        Enum.Font.GothamBold
+
+    health.TextSize =
+        11
+
+    health.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    health.Parent =
+        screenGui
+
+    -- DISTANCE
+
+    local distance =
+        Instance.new("TextLabel")
+
+    distance.AnchorPoint =
+        Vector2.new(
+            0.5,
+            0
+        )
+
+    distance.BackgroundTransparency =
+        1
+
+    distance.TextColor3 =
+        Color3.fromRGB(
+            200,
+            200,
+            200
+        )
+
+    distance.TextStrokeColor3 =
+        Color3.new(
+            0,
+            0,
+            0
+        )
+
+    distance.TextStrokeTransparency =
+        0
+
+    distance.Font =
+        Enum.Font.Gotham
+
+    distance.TextSize =
+        11
+
+    distance.Parent =
+        screenGui
+
+    esp.ScreenGui =
+        screenGui
+
+    esp.ScreenBox =
+        frame
+
+    esp.ScreenStroke =
+        stroke
+
+    esp.ScreenName =
+        name
+
+    esp.ScreenHealth =
+        health
+
+    esp.ScreenDistance =
+        distance
 end
 
 --==============================================================
@@ -772,7 +1416,12 @@ local function hideESP(esp)
         esp.Gui.Enabled = false
     end
 
-    esp.Mode = "None"
+    if esp.ScreenGui then
+        esp.ScreenGui.Enabled = false
+    end
+
+    esp.Mode =
+        "None"
 end
 
 --==============================================================
@@ -788,96 +1437,15 @@ local function removeESP(player)
         return
     end
 
-    if esp.Tween then
-        pcall(function()
-            esp.Tween:Cancel()
-        end)
-    end
+    safeDestroy(esp.ScreenGui)
+    safeDestroy(esp.Part)
 
-    if esp.Part then
-        esp.Part:Destroy()
-    end
-
-    ESPObjects[player] = nil
+    ESPObjects[player] =
+        nil
 end
 
 --==============================================================
--- INITIAL PLAYERS
---==============================================================
-
-for _, player in ipairs(
-    Players:GetPlayers()
-) do
-
-    createESP(player)
-
-end
-
---==============================================================
--- PLAYER ADDED
---==============================================================
-
-Players.PlayerAdded:Connect(function(player)
-
-    createESP(player)
-
-end)
-
---==============================================================
--- PLAYER REMOVING
---==============================================================
-
-Players.PlayerRemoving:Connect(function(player)
-
-    removeESP(player)
-
-end)
-
---==============================================================
--- CHARACTER ADDED
---==============================================================
-
-local function setupESPCharacter(player)
-
-    player.CharacterAdded:Connect(function()
-
-        local esp =
-            ESPObjects[player]
-
-        if esp then
-
-            esp.LastPos = nil
-
-            esp.LastValidTime =
-                os.clock()
-
-            esp.Mode = "None"
-
-        end
-
-    end)
-end
-
-for _, player in ipairs(
-    Players:GetPlayers()
-) do
-
-    if player ~= LocalPlayer then
-        setupESPCharacter(player)
-    end
-
-end
-
-Players.PlayerAdded:Connect(function(player)
-
-    if player ~= LocalPlayer then
-        setupESPCharacter(player)
-    end
-
-end)
-
---==============================================================
--- UPDATE LAST POSITION
+-- LAST POSITION
 --==============================================================
 
 local function updateLastPosition(
@@ -895,43 +1463,28 @@ local function updateLastPosition(
         return false
     end
 
-    -- сохраняем последнюю валидную позицию
-    esp.LastPos = pos
-
-    --==========================================================
-    -- UPDATE BILLBOARD POSITION
-    --==========================================================
+    esp.LastPos =
+        pos
 
     if esp.Mode ~= "LastPosition" then
 
-        esp.Part.Position = pos
+        esp.Part.Position =
+            pos
 
-        esp.Mode = "LastPosition"
+        esp.Mode =
+            "LastPosition"
 
     else
 
-        local current =
-            esp.Part.Position
-
-        local newPosition =
-            current:Lerp(
+        esp.Part.Position =
+            esp.Part.Position:Lerp(
                 pos,
                 ESPSettings.Smoothness
             )
-
-        esp.Part.Position =
-            newPosition
     end
 
-    --==========================================================
-    -- SHOW
-    --==========================================================
-
-    esp.Gui.Enabled = true
-
-    --==========================================================
-    -- LAST POSITION STYLE
-    --==========================================================
+    esp.Gui.Enabled =
+        true
 
     esp.BoxStroke.Color =
         State.ESPColor
@@ -940,9 +1493,6 @@ local function updateLastPosition(
         player.DisplayName
 
     esp.HealthBackground.Visible =
-        false
-
-    esp.HealthBar.Visible =
         false
 
     esp.HealthText.Visible =
@@ -959,14 +1509,83 @@ local function updateLastPosition(
 end
 
 --==============================================================
--- MAIN HYBRID ESP LOOP
+-- INITIAL ESP
+--==============================================================
+
+for _, player in ipairs(
+    Players:GetPlayers()
+) do
+
+    createESP(player)
+
+end
+
+Players.PlayerAdded:Connect(function(player)
+
+    createESP(player)
+
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+
+    removeESP(player)
+
+end)
+
+--==============================================================
+-- CHARACTER EVENTS
+--==============================================================
+
+local function setupESPCharacter(player)
+
+    if player == LocalPlayer then
+        return
+    end
+
+    player.CharacterAdded:Connect(function()
+
+        local esp =
+            ESPObjects[player]
+
+        if esp then
+
+            esp.LastPos =
+                nil
+
+            esp.LastValidTime =
+                os.clock()
+
+            esp.Mode =
+                "None"
+
+            if esp.ScreenGui then
+                esp.ScreenGui.Enabled =
+                    false
+            end
+
+        end
+    end)
+end
+
+for _, player in ipairs(
+    Players:GetPlayers()
+) do
+
+    setupESPCharacter(player)
+
+end
+
+Players.PlayerAdded:Connect(function(player)
+
+    setupESPCharacter(player)
+
+end)
+
+--==============================================================
+-- ESP UPDATE
 --==============================================================
 
 RunService.RenderStepped:Connect(function()
-
-    --==========================================================
-    -- DISABLED
-    --==========================================================
 
     if not State.ESPEnabled then
 
@@ -981,9 +1600,15 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
-    --==========================================================
-    -- PLAYERS
-    --==========================================================
+    local localCharacter =
+        LocalPlayer.Character
+
+    local localRoot =
+        getRoot(localCharacter)
+
+    if not localRoot then
+        return
+    end
 
     for player, esp in pairs(
         ESPObjects
@@ -996,44 +1621,17 @@ RunService.RenderStepped:Connect(function()
             continue
         end
 
-        --======================================================
-        -- CHARACTER
-        --======================================================
-
         local character =
             player.Character
 
         local humanoid =
-            character
-            and character:FindFirstChildOfClass(
-                "Humanoid"
-            )
+            getHumanoid(character)
 
         --======================================================
-        -- LOCAL PLAYER POSITION
+        -- REAL CHARACTER
         --======================================================
 
-        local localCharacter =
-            LocalPlayer.Character
-
-        local localRoot =
-            localCharacter
-            and localCharacter:FindFirstChild(
-                "HumanoidRootPart"
-            )
-
-        if not localRoot then
-
-            hideESP(esp)
-
-            continue
-        end
-
-        --======================================================
-        -- TRY HYBRID FIRST
-        --======================================================
-
-        local hybridBox = nil
+        local hybridBox
 
         if character then
 
@@ -1043,218 +1641,18 @@ RunService.RenderStepped:Connect(function()
                 )
         end
 
-        --======================================================
-        -- HYBRID SUCCESS
-        --======================================================
-
         if hybridBox then
 
-            esp.Mode = "Hybrid"
+            esp.Mode =
+                "Hybrid"
 
-            esp.Gui.Enabled = false
+            esp.Gui.Enabled =
+                false
 
-            --==================================================
-            -- REAL CHARACTER BOX
-            --==================================================
+            createScreenESP(esp)
 
-            -- Billboard отключён.
-            -- Для Hybrid используем ScreenGui.
-            -- Создаём его лениво.
-
-            if not esp.ScreenGui then
-
-                local screenGui =
-                    Instance.new(
-                        "ScreenGui"
-                    )
-
-                screenGui.Name =
-                    "HybridESP"
-
-                screenGui.IgnoreGuiInset =
-                    true
-
-                screenGui.ResetOnSpawn =
-                    false
-
-                screenGui.Parent =
-                    LocalPlayer.PlayerGui
-
-                local frame =
-                    Instance.new(
-                        "Frame"
-                    )
-
-                frame.Name = "Box"
-
-                frame.BackgroundTransparency =
-                    1
-
-                frame.BorderSizePixel = 0
-
-                frame.Parent =
-                    screenGui
-
-                local stroke =
-                    Instance.new(
-                        "UIStroke"
-                    )
-
-                stroke.Thickness =
-                    ESPSettings.BoxThickness
-
-                stroke.Color =
-                    State.ESPColor
-
-                stroke.Parent = frame
-
-                -- NAME
-
-                local name =
-                    Instance.new(
-                        "TextLabel"
-                    )
-
-                name.Name = "Name"
-
-                name.AnchorPoint =
-                    Vector2.new(
-                        0.5,
-                        1
-                    )
-
-                name.BackgroundTransparency =
-                    1
-
-                name.TextColor3 =
-                    ESPSettings.TextColor
-
-                name.TextStrokeColor3 =
-                    Color3.new(
-                        0,
-                        0,
-                        0
-                    )
-
-                name.TextStrokeTransparency =
-                    0
-
-                name.Font =
-                    Enum.Font.GothamBold
-
-                name.TextSize = 13
-
-                name.Parent =
-                    screenGui
-
-                -- HP
-
-                local hp =
-                    Instance.new(
-                        "TextLabel"
-                    )
-
-                hp.Name =
-                    "Health"
-
-                hp.AnchorPoint =
-                    Vector2.new(
-                        0,
-                        0.5
-                    )
-
-                hp.BackgroundTransparency =
-                    1
-
-                hp.TextStrokeColor3 =
-                    Color3.new(
-                        0,
-                        0,
-                        0
-                    )
-
-                hp.TextStrokeTransparency =
-                    0
-
-                hp.Font =
-                    Enum.Font.GothamBold
-
-                hp.TextSize = 11
-
-                hp.TextXAlignment =
-                    Enum.TextXAlignment.Left
-
-                hp.Parent =
-                    screenGui
-
-                -- DISTANCE
-
-                local distance =
-                    Instance.new(
-                        "TextLabel"
-                    )
-
-                distance.Name =
-                    "Distance"
-
-                distance.AnchorPoint =
-                    Vector2.new(
-                        0.5,
-                        0
-                    )
-
-                distance.BackgroundTransparency =
-                    1
-
-                distance.TextColor3 =
-                    Color3.fromRGB(
-                        200,
-                        200,
-                        200
-                    )
-
-                distance.TextStrokeColor3 =
-                    Color3.new(
-                        0,
-                        0,
-                        0
-                    )
-
-                distance.TextStrokeTransparency =
-                    0
-
-                distance.Font =
-                    Enum.Font.Gotham
-
-                distance.TextSize = 11
-
-                distance.Parent =
-                    screenGui
-
-                esp.ScreenGui =
-                    screenGui
-
-                esp.ScreenBox =
-                    frame
-
-                esp.ScreenStroke =
-                    stroke
-
-                esp.ScreenName =
-                    name
-
-                esp.ScreenHealth =
-                    hp
-
-                esp.ScreenDistance =
-                    distance
-            end
-
-            --==================================================
-            -- ENABLE SCREEN ESP
-            --==================================================
-
-            esp.ScreenGui.Enabled = true
+            esp.ScreenGui.Enabled =
+                true
 
             local box =
                 esp.ScreenBox
@@ -1271,9 +1669,7 @@ RunService.RenderStepped:Connect(function()
             local distanceLabel =
                 esp.ScreenDistance
 
-            --==================================================
             -- BOX
-            --==================================================
 
             box.Position =
                 UDim2.fromOffset(
@@ -1290,9 +1686,7 @@ RunService.RenderStepped:Connect(function()
             stroke.Color =
                 State.ESPColor
 
-            --==================================================
             -- NAME
-            --==================================================
 
             name.Position =
                 UDim2.fromOffset(
@@ -1309,9 +1703,7 @@ RunService.RenderStepped:Connect(function()
             name.Text =
                 player.DisplayName
 
-            --==================================================
-            -- HEALTH
-            --==================================================
+            -- HP
 
             local healthColor =
                 Color3.fromRGB(
@@ -1375,79 +1767,67 @@ RunService.RenderStepped:Connect(function()
 
             hp.Size =
                 UDim2.fromOffset(
-                    80,
+                    90,
                     18
                 )
 
-            --==================================================
             -- DISTANCE
-            --==================================================
 
-            local worldPosition
+            local worldPosition =
+                getCharacterPosition(
+                    character
+                )
 
-            local primary =
-                character.PrimaryPart
+            if worldPosition then
 
-            if primary then
-                worldPosition =
-                    primary.Position
-            else
-                worldPosition =
-                    character:GetPivot().Position
+                local distance =
+                    (
+                        localRoot.Position
+                        - worldPosition
+                    ).Magnitude
+
+                distanceLabel.Position =
+                    UDim2.fromOffset(
+                        hybridBox.CenterX,
+                        hybridBox.Y
+                        + hybridBox.Height
+                        + 4
+                    )
+
+                distanceLabel.Size =
+                    UDim2.fromOffset(
+                        100,
+                        18
+                    )
+
+                distanceLabel.Text =
+                    math.floor(distance)
+                    .. " Stud"
+
+                -- Save position
+                player:SetAttribute(
+                    "LastPosition",
+                    worldPosition
+                )
+
+                esp.LastValidTime =
+                    os.clock()
             end
-
-            local distance =
-                (
-                    localRoot.Position
-                    - worldPosition
-                ).Magnitude
-
-            distanceLabel.Position =
-                UDim2.fromOffset(
-                    hybridBox.CenterX,
-                    hybridBox.Y
-                    + hybridBox.Height
-                    + 4
-                )
-
-            distanceLabel.Size =
-                UDim2.fromOffset(
-                    100,
-                    18
-                )
-
-            distanceLabel.Text =
-                math.floor(distance)
-                .. " Stud"
-
-            --==================================================
-            -- SAVE LAST POSITION
-            --==================================================
-
-            local lastPosition =
-                character:GetPivot().Position
-
-            player:SetAttribute(
-                "LastPosition",
-                lastPosition
-            )
-
-            esp.LastValidTime =
-                os.clock()
 
             continue
         end
 
         --======================================================
-        -- HYBRID FAILED
+        -- NO REAL CHARACTER
         --======================================================
 
         if esp.ScreenGui then
-            esp.ScreenGui.Enabled = false
+            esp.ScreenGui.Enabled =
+                false
         end
 
         --======================================================
-        -- LAST POSITION FALLBACK
+        -- FALLBACK
         --======================================================
 
         local lastPosition =
@@ -1467,104 +1847,126 @@ RunService.RenderStepped:Connect(function()
             if distance <=
                 ESPSettings.MaxDistance then
 
-                updateLastPosition(
+                if updateLastPosition(
                     player,
                     esp,
                     distance
-                )
+                ) then
 
-                continue
+                    continue
+                end
             end
         end
 
-        --======================================================
-        -- NOTHING AVAILABLE
-        --======================================================
-
         hideESP(esp)
-
     end
 end)
 
 --==============================================================
--- CLEANUP
+-- FOV
 --==============================================================
 
-Players.PlayerRemoving:Connect(function(player)
+local FOVGui =
+    Instance.new("ScreenGui")
 
-    local esp =
-        ESPObjects[player]
+FOVGui.Name =
+    "AestheticFOV"
 
-    if esp then
+FOVGui.ResetOnSpawn =
+    false
 
-        if esp.ScreenGui then
-            esp.ScreenGui:Destroy()
-        end
+FOVGui.IgnoreGuiInset =
+    true
 
-        if esp.Part then
-            esp.Part:Destroy()
-        end
+FOVGui.DisplayOrder =
+    999999
 
-        ESPObjects[player] = nil
-    end
-end)
+FOVGui.Parent =
+    PlayerGui
 
-print(
-    "[aesthetic] Hybrid ESP loaded"
-)
---==============================================================
--- FOV CIRCLE
---==============================================================
+local FOVCircle =
+    Instance.new("Frame")
 
---==============================================================
--- FOV CIRCLE — ROBLOX GUI
---==============================================================
+FOVCircle.Name =
+    "Circle"
 
-local FOVGui = Instance.new("ScreenGui")
-FOVGui.Name = "AestheticFOV"
-FOVGui.ResetOnSpawn = false
-FOVGui.IgnoreGuiInset = true
-FOVGui.DisplayOrder = 999999
-FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+FOVCircle.AnchorPoint =
+    Vector2.new(
+        0.5,
+        0.5
+    )
 
-local FOVCircle = Instance.new("Frame")
-FOVCircle.Name = "Circle"
-FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
-FOVCircle.BackgroundTransparency = 1
-FOVCircle.Size = UDim2.fromOffset(
-    State.FOVSize * 2,
-    State.FOVSize * 2
-)
-FOVCircle.Position = UDim2.fromScale(0.5, 0.5)
-FOVCircle.Parent = FOVGui
+FOVCircle.BackgroundTransparency =
+    1
 
-local FOVCorner = Instance.new("UICorner")
-FOVCorner.CornerRadius = UDim.new(1, 0)
-FOVCorner.Parent = FOVCircle
+FOVCircle.Size =
+    UDim2.fromOffset(
+        State.FOVSize * 2,
+        State.FOVSize * 2
+    )
 
-local FOVStroke = Instance.new("UIStroke")
-FOVStroke.Thickness = 1.5
-FOVStroke.Color = State.FOVColor
-FOVStroke.Transparency = 0
-FOVStroke.Parent = FOVCircle
+FOVCircle.Position =
+    UDim2.fromScale(
+        0.5,
+        0.5
+    )
 
-FOVGui.Enabled = false
+FOVCircle.Parent =
+    FOVGui
+
+local FOVCorner =
+    Instance.new("UICorner")
+
+FOVCorner.CornerRadius =
+    UDim.new(
+        1,
+        0
+    )
+
+FOVCorner.Parent =
+    FOVCircle
+
+local FOVStroke =
+    Instance.new("UIStroke")
+
+FOVStroke.Thickness =
+    1.5
+
+FOVStroke.Color =
+    State.FOVColor
+
+FOVStroke.Parent =
+    FOVCircle
+
+FOVGui.Enabled =
+    false
 
 local rainbowHue = 0
 
 RunService.RenderStepped:Connect(function(dt)
 
     if not State.FOVEnabled then
-        FOVGui.Enabled = false
+
+        FOVGui.Enabled =
+            false
+
         return
     end
 
-    FOVGui.Enabled = true
+    if not Camera then
+        return
+    end
+
+    FOVGui.Enabled =
+        true
+
+    local viewport =
+        Camera.ViewportSize
 
     FOVCircle.Position =
         UDim2.fromOffset(
-            Camera.ViewportSize.X / 2,
-            Camera.ViewportSize.Y / 2
+            viewport.X / 2,
+            viewport.Y / 2
         )
 
     FOVCircle.Size =
@@ -1576,7 +1978,10 @@ RunService.RenderStepped:Connect(function(dt)
     if State.FOVRainbow then
 
         rainbowHue =
-            (rainbowHue + dt * 0.5) % 1
+            (
+                rainbowHue
+                + dt * 0.5
+            ) % 1
 
         FOVStroke.Color =
             Color3.fromHSV(
@@ -1589,163 +1994,20 @@ RunService.RenderStepped:Connect(function(dt)
 
         FOVStroke.Color =
             State.FOVColor
-
     end
 end)
---==============================================================
--- AIMBOT
---==============================================================
 
 --==============================================================
--- UNIVERSAL AIM PART
---==============================================================
-
-local function getAimPart(character)
-
-    if not character then
-        return nil
-    end
-
-    -- 1. Head
-    local head =
-        character:FindFirstChild("Head")
-
-    if head
-        and head:IsA("BasePart") then
-
-        return head
-    end
-
-    -- 2. PrimaryPart
-    if character.PrimaryPart
-        and character.PrimaryPart:IsA("BasePart") then
-
-        return character.PrimaryPart
-    end
-
-    -- 3. HumanoidRootPart
-    local root =
-        character:FindFirstChild(
-            "HumanoidRootPart"
-        )
-
-    if root
-        and root:IsA("BasePart") then
-
-        return root
-    end
-
-    -- 4. Любая подходящая часть
-    for _, obj in ipairs(
-        character:GetDescendants()
-    ) do
-
-        if obj:IsA("BasePart")
-            and obj.Transparency < 1 then
-
-            return obj
-        end
-    end
-
-    return nil
-end
-
---==============================================================
--- AIMBOT TARGET
---==============================================================
-
-local function getAimbotTarget()
-
-    local center =
-        Vector2.new(
-            Camera.ViewportSize.X / 2,
-            Camera.ViewportSize.Y / 2
-        )
-
-    local nearestPart = nil
-
-    local nearestDistance =
-        State.FOVSize
-
-    for _, player in ipairs(
-        Players:GetPlayers()
-    ) do
-
-        if player == LocalPlayer then
-            continue
-        end
-
-        local character =
-            player.Character
-
-        if not character then
-            continue
-        end
-
-        -- Humanoid необязателен
-        -- для твоей нестандартной игры
-        local humanoid =
-            character:FindFirstChildOfClass(
-                "Humanoid"
-            )
-
-        if humanoid
-            and humanoid.Health <= 0 then
-
-            continue
-        end
-
-        local aimPart =
-            getAimPart(character)
-
-        if not aimPart then
-            continue
-        end
-
-        local screenPosition,
-              onScreen =
-            Camera:WorldToViewportPoint(
-                aimPart.Position
-            )
-
-        if not onScreen then
-            continue
-        end
-
-        if screenPosition.Z <= 0 then
-            continue
-        end
-
-        local screenDistance =
-            (
-                Vector2.new(
-                    screenPosition.X,
-                    screenPosition.Y
-                )
-                - center
-            ).Magnitude
-
-        if screenDistance <
-            nearestDistance then
-
-            nearestDistance =
-                screenDistance
-
-            nearestPart =
-                aimPart
-        end
-    end
-
-    return nearestPart
-end
-
---==============================================================
--- AIMBOT
+-- AIMBOT LOOP
 --==============================================================
 
 RunService.RenderStepped:Connect(function()
 
     if not State.AimbotEnabled then
+        return
+    end
+
+    if not Camera then
         return
     end
 
@@ -1760,76 +2022,230 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
+    local cameraPosition =
+        Camera.CFrame.Position
+
     Camera.CFrame =
         CFrame.new(
-            Camera.CFrame.Position,
+            cameraPosition,
             target.Position
         )
 end)
+
 --==============================================================
--- KILL AURA LOOP
+-- KILL AURA
 --==============================================================
+
+--==============================================================
+-- KILL AURA
+--==============================================================
+
+local function performAttack()
+
+    if not AttackRemote then
+        return false
+    end
+
+    local target =
+        getNearestTarget()
+
+    if not target then
+        return false
+    end
+
+    local character =
+        LocalPlayer.Character
+
+    if not character then
+        return false
+    end
+
+    local slot =
+        character:GetAttribute(
+            "ReplicatedHotbarSlot"
+        )
+
+    if slot == nil then
+        return false
+    end
+
+    local success =
+        pcall(function()
+
+            AttackRemote:InvokeServer(
+                target,
+                tostring(slot)
+            )
+
+        end)
+
+    return success
+end
 
 task.spawn(function()
+
     while true do
-        if State.KillAura then
-            local target = getNearestTarget()
-            if target then
-                local char = LocalPlayer.Character
-                if char then
-                    local slot = char:GetAttribute("ReplicatedHotbarSlot")
-                    if slot ~= nil then
-                        pcall(function()
-                            AttackRemote:InvokeServer(target, tostring(slot))
-                        end)
-                    end
-                end
+
+        local shouldAttack =
+            State.KillAura
+
+        --==========================================================
+        -- JUMP ATTACK
+        --==========================================================
+
+        if State.JumpAttack then
+
+            if isLocalPlayerJumping() then
+
+                shouldAttack =
+                    State.KillAura
             end
         end
-        task.wait(State.AttackDelay)
+
+        if shouldAttack then
+
+            performAttack()
+
+            task.wait(
+                math.max(
+                    State.AttackDelay,
+                    0.01
+                )
+            )
+
+        else
+
+            task.wait(0.05)
+
+        end
     end
 end)
-
 --==============================================================
--- NO FALL DAMAGE / NO DROW DAMAGE (namecall hook)
+-- JUMP STATE
 --==============================================================
 
-if typeof(hookmetamethod) == "function" then
-    State.OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
+local function isLocalPlayerJumping()
 
-        if method == "FireServer" then
-            if self == FallRemote and (State.NoFallDamage or State.NoDrowDamage) then
-                return
-            end
-        end
+    local character =
+        LocalPlayer.Character
 
-        return State.OldNamecall(self, ...)
-    end)
+    local humanoid =
+        getHumanoid(character)
+
+    if not humanoid then
+        return false
+    end
+
+    local state =
+        humanoid:GetState()
+
+    return state ==
+        Enum.HumanoidStateType.Jumping
+        or state ==
+        Enum.HumanoidStateType.Freefall
 end
 
 --==============================================================
--- FLY
+-- NO FALL / NO DROWN
 --==============================================================
 
+if typeof(hookmetamethod) ==
+    "function"
+    and typeof(getnamecallmethod) ==
+    "function" then
+
+    local oldNamecall
+
+    oldNamecall =
+        hookmetamethod(
+            game,
+            "__namecall",
+            function(self, ...)
+
+                local method
+
+                pcall(function()
+                    method =
+                        getnamecallmethod()
+                end)
+
+                if method == "FireServer"
+                    and self == FallRemote
+                    and (
+                        State.NoFallDamage
+                        or State.NoDrowDamage
+                    ) then
+
+                    return nil
+                end
+
+                return oldNamecall(
+                    self,
+                    ...
+                )
+            end
+        )
+
+    State.OldNamecall =
+        oldNamecall
+end
+
 --==============================================================
--- MOBILE FLY CONTROLS
+-- MOBILE FLY GUI
 --==============================================================
 
-local FlyGui = Instance.new("ScreenGui")
-FlyGui.Name = "AestheticMobileFly"
-FlyGui.ResetOnSpawn = false
-FlyGui.IgnoreGuiInset = true
-FlyGui.Enabled = false
-FlyGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+local FlyGui =
+    Instance.new("ScreenGui")
 
-local FlyFrame = Instance.new("Frame")
-FlyFrame.Name = "Controls"
-FlyFrame.AnchorPoint = Vector2.new(1, 1)
-FlyFrame.Position = UDim2.new(1, -25, 1, -35)
-FlyFrame.Size = UDim2.fromOffset(220, 190)
-FlyFrame.BackgroundTransparency = 1
-FlyFrame.Parent = FlyGui
+FlyGui.Name =
+    "AestheticMobileFly"
+
+FlyGui.ResetOnSpawn =
+    false
+
+FlyGui.IgnoreGuiInset =
+    true
+
+FlyGui.Enabled =
+    false
+
+FlyGui.DisplayOrder =
+    999997
+
+FlyGui.Parent =
+    PlayerGui
+
+local FlyFrame =
+    Instance.new("Frame")
+
+FlyFrame.Name =
+    "Controls"
+
+FlyFrame.AnchorPoint =
+    Vector2.new(
+        1,
+        1
+    )
+
+FlyFrame.Position =
+    UDim2.new(
+        1,
+        -25,
+        1,
+        -35
+    )
+
+FlyFrame.Size =
+    UDim2.fromOffset(
+        220,
+        190
+    )
+
+FlyFrame.BackgroundTransparency =
+    1
+
+FlyFrame.Parent =
+    FlyGui
 
 local FlyButtons = {}
 
@@ -1839,45 +2255,70 @@ local function createFlyButton(
     position
 )
 
-    local button = Instance.new("TextButton")
+    local button =
+        Instance.new("TextButton")
 
-    button.Name = name
-    button.Text = text
+    button.Name =
+        name
 
-    button.Position = position
-    button.Size = UDim2.fromOffset(60, 50)
+    button.Text =
+        text
+
+    button.Position =
+        position
+
+    button.Size =
+        UDim2.fromOffset(
+            60,
+            50
+        )
 
     button.BackgroundColor3 =
-        Color3.fromRGB(25, 25, 25)
+        Color3.fromRGB(
+            25,
+            25,
+            25
+        )
 
-    button.BackgroundTransparency = 0.2
+    button.BackgroundTransparency =
+        0.2
 
     button.TextColor3 =
-        Color3.fromRGB(255, 255, 255)
+        Color3.fromRGB(
+            255,
+            255,
+            255
+        )
 
-    button.TextSize = 20
-    button.Font = Enum.Font.GothamBold
+    button.TextSize =
+        20
 
-    button.AutoButtonColor = true
+    button.Font =
+        Enum.Font.GothamBold
 
-    button.BorderSizePixel = 0
+    button.BorderSizePixel =
+        0
 
     local corner =
         Instance.new("UICorner")
 
     corner.CornerRadius =
-        UDim.new(0, 10)
+        UDim.new(
+            0,
+            10
+        )
 
-    corner.Parent = button
+    corner.Parent =
+        button
 
-    button.Parent = FlyFrame
+    button.Parent =
+        FlyFrame
 
     FlyButtons[name] = {
         Button = button,
         Held = false
     }
 
-    -- Touch / mobile
     button.InputBegan:Connect(function(input)
 
         if input.UserInputType ==
@@ -1885,7 +2326,8 @@ local function createFlyButton(
             or input.UserInputType ==
             Enum.UserInputType.MouseButton1 then
 
-            FlyButtons[name].Held = true
+            FlyButtons[name].Held =
+                true
         end
     end)
 
@@ -1896,95 +2338,144 @@ local function createFlyButton(
             or input.UserInputType ==
             Enum.UserInputType.MouseButton1 then
 
-            FlyButtons[name].Held = false
+            FlyButtons[name].Held =
+                false
         end
     end)
 
     return button
 end
 
---==============================================================
--- BUTTON LAYOUT
---==============================================================
-
 createFlyButton(
     "Forward",
     "▲",
-    UDim2.fromOffset(80, 0)
+    UDim2.fromOffset(
+        80,
+        0
+    )
 )
 
 createFlyButton(
     "Left",
     "◀",
-    UDim2.fromOffset(15, 55)
+    UDim2.fromOffset(
+        15,
+        55
+    )
 )
 
 createFlyButton(
     "Back",
     "▼",
-    UDim2.fromOffset(80, 55)
+    UDim2.fromOffset(
+        80,
+        55
+    )
 )
 
 createFlyButton(
     "Right",
     "▶",
-    UDim2.fromOffset(145, 55)
+    UDim2.fromOffset(
+        145,
+        55
+    )
 )
 
 createFlyButton(
     "Up",
     "UP",
-    UDim2.fromOffset(145, 110)
+    UDim2.fromOffset(
+        145,
+        110
+    )
 )
 
 createFlyButton(
     "Down",
     "DOWN",
-    UDim2.fromOffset(15, 110)
+    UDim2.fromOffset(
+        15,
+        110
+    )
 )
 
 --==============================================================
--- FLY
+-- FLY ENABLE
 --==============================================================
+
+local function disableFly()
+
+    safeDestroy(
+        State.FlyBodyVelocity
+    )
+
+    safeDestroy(
+        State.FlyBodyGyro
+    )
+
+    State.FlyBodyVelocity =
+        nil
+
+    State.FlyBodyGyro =
+        nil
+
+    local character =
+        LocalPlayer.Character
+
+    local humanoid =
+        getHumanoid(character)
+
+    if humanoid then
+
+        pcall(function()
+            humanoid.PlatformStand =
+                false
+        end)
+    end
+
+    FlyGui.Enabled =
+        false
+
+    for _, data in pairs(
+        FlyButtons
+    ) do
+
+        data.Held =
+            false
+    end
+end
 
 local function enableFly()
 
-    local char =
+    disableFly()
+
+    local character =
         LocalPlayer.Character
 
-    if not char then
-        return
+    if not character then
+        return false
     end
 
     local root =
-        getRoot(char)
+        getRoot(character)
 
-    if not root then
-        return
+    local humanoid =
+        getHumanoid(character)
+
+    if not root or not humanoid then
+        return false
     end
 
-    local hum =
-        getHumanoid(char)
-
-    if not hum then
-        return
-    end
-
-    -- Remove old objects
-    if State.FlyBodyVelocity then
-        State.FlyBodyVelocity:Destroy()
-        State.FlyBodyVelocity = nil
-    end
-
-    if State.FlyBodyGyro then
-        State.FlyBodyGyro:Destroy()
-        State.FlyBodyGyro = nil
-    end
-
-    hum.PlatformStand = true
+    pcall(function()
+        humanoid.PlatformStand =
+            true
+    end)
 
     local bv =
-        Instance.new("BodyVelocity")
+        Instance.new(
+            "BodyVelocity"
+        )
 
     bv.MaxForce =
         Vector3.new(
@@ -1996,12 +2487,13 @@ local function enableFly()
     bv.Velocity =
         Vector3.zero
 
-    bv.Parent = root
-
-    State.FlyBodyVelocity = bv
+    bv.Parent =
+        root
 
     local bg =
-        Instance.new("BodyGyro")
+        Instance.new(
+            "BodyGyro"
+        )
 
     bg.MaxTorque =
         Vector3.new(
@@ -2010,52 +2502,25 @@ local function enableFly()
             1e9
         )
 
-    bg.P = 10000
+    bg.P =
+        10000
 
     bg.CFrame =
         root.CFrame
 
-    bg.Parent = root
+    bg.Parent =
+        root
 
-    State.FlyBodyGyro = bg
+    State.FlyBodyVelocity =
+        bv
 
-    -- Show mobile controls
+    State.FlyBodyGyro =
+        bg
+
     FlyGui.Enabled =
         UserInputService.TouchEnabled
-end
 
-local function disableFly()
-
-    if State.FlyBodyVelocity then
-
-        State.FlyBodyVelocity:Destroy()
-
-        State.FlyBodyVelocity = nil
-    end
-
-    if State.FlyBodyGyro then
-
-        State.FlyBodyGyro:Destroy()
-
-        State.FlyBodyGyro = nil
-    end
-
-    local char =
-        LocalPlayer.Character
-
-    local hum =
-        getHumanoid(char)
-
-    if hum then
-        hum.PlatformStand = false
-    end
-
-    FlyGui.Enabled = false
-
-    -- Reset buttons
-    for _, data in pairs(FlyButtons) do
-        data.Held = false
-    end
+    return true
 end
 
 --==============================================================
@@ -2078,12 +2543,14 @@ RunService.RenderStepped:Connect(function()
         return
     end
 
+    if not Camera then
+        return
+    end
+
     local direction =
         Vector3.zero
 
-    --==========================================================
-    -- KEYBOARD
-    --==========================================================
+    -- Keyboard
 
     if UserInputService:IsKeyDown(
         Enum.KeyCode.W
@@ -2122,7 +2589,11 @@ RunService.RenderStepped:Connect(function()
     ) then
 
         direction +=
-            Vector3.new(0, 1, 0)
+            Vector3.new(
+                0,
+                1,
+                0
+            )
     end
 
     if UserInputService:IsKeyDown(
@@ -2130,39 +2601,36 @@ RunService.RenderStepped:Connect(function()
     ) then
 
         direction -=
-            Vector3.new(0, 1, 0)
+            Vector3.new(
+                0,
+                1,
+                0
+            )
     end
 
-    --==========================================================
-    -- MOBILE
-    --==========================================================
+    -- Mobile
 
     if FlyButtons.Forward.Held then
-
         direction +=
             Camera.CFrame.LookVector
     end
 
     if FlyButtons.Back.Held then
-
         direction -=
             Camera.CFrame.LookVector
     end
 
     if FlyButtons.Left.Held then
-
         direction -=
             Camera.CFrame.RightVector
     end
 
     if FlyButtons.Right.Held then
-
         direction +=
             Camera.CFrame.RightVector
     end
 
     if FlyButtons.Up.Held then
-
         direction +=
             Vector3.new(
                 0,
@@ -2172,7 +2640,6 @@ RunService.RenderStepped:Connect(function()
     end
 
     if FlyButtons.Down.Held then
-
         direction -=
             Vector3.new(
                 0,
@@ -2181,15 +2648,11 @@ RunService.RenderStepped:Connect(function()
             )
     end
 
-    --==========================================================
-    -- VELOCITY
-    --==========================================================
-
     if direction.Magnitude > 0 then
 
         bv.Velocity =
             direction.Unit
-            * State.Speed
+            * State.FlySpeed
 
     else
 
@@ -2197,70 +2660,99 @@ RunService.RenderStepped:Connect(function()
             Vector3.zero
     end
 
-    -- Follow camera
     bg.CFrame =
-        Camera.CFrame
+        CFrame.lookAt(
+            rootPositionOrFallback(
+                LocalPlayer.Character
+            ),
+            rootPositionOrFallback(
+                LocalPlayer.Character
+            ) + Camera.CFrame.LookVector
+        )
 end)
 
 --==============================================================
--- SPEED & JUMP POWER
+-- ROOT POSITION HELPER
+--==============================================================
+
+function rootPositionOrFallback(character)
+
+    local root =
+        getRoot(character)
+
+    if root then
+        return root.Position
+    end
+
+    return Vector3.zero
+end
+
+--==============================================================
+-- CHARACTER STATS
 --==============================================================
 
 local function applyCharacterStats()
 
-    local char = LocalPlayer.Character
-    if not char then
+    local character =
+        LocalPlayer.Character
+
+    if not character then
         return
     end
 
-    local hum = getHumanoid(char)
-    if not hum then
+    local humanoid =
+        getHumanoid(character)
+
+    if not humanoid then
         return
     end
 
-    -- SPEED
-    hum.WalkSpeed = State.Speed
-
-    -- JUMP POWER
     pcall(function()
-        hum.UseJumpPower = true
-    end)
 
-    hum.JumpPower = State.JumpPower
+        humanoid.WalkSpeed =
+            State.Speed
+
+        humanoid.UseJumpPower =
+            true
+
+        humanoid.JumpPower =
+            State.JumpPower
+
+    end)
 end
 
 --==============================================================
--- CHARACTER RESPAWN
+-- CHARACTER ADDED
 --==============================================================
 
 LocalPlayer.CharacterAdded:Connect(function()
 
-    task.wait(1)
+    task.wait(0.5)
 
     applyCharacterStats()
 
     if State.FlyEnabled then
+
+        task.wait(0.25)
+
         enableFly()
     end
-
 end)
---==============================================================
--- MINING / FAST BREAK
---==============================================================
 
-local MiningMaterialService =
-    game:GetService("MaterialService")
-
-local MiningCamera =
-    workspace.CurrentCamera
+--==============================================================
+-- MINING
+--==============================================================
 
 local ignoredMaterials =
     State.IgnoreMaterials
 
 local materialList = {}
 
-local fastBreakOldFunction = nil
-local fastBreakHooked = false
+local fastBreakOldFunction =
+    nil
+
+local fastBreakHooked =
+    false
 
 --==============================================================
 -- MATERIAL LIST
@@ -2269,46 +2761,51 @@ local fastBreakHooked = false
 pcall(function()
 
     local compiled =
-        MiningMaterialService:FindFirstChild(
+        MaterialService:FindFirstChild(
             "CompiledMaterials"
         )
 
     if compiled then
 
-        for _, mat in ipairs(
+        for _, material in ipairs(
             compiled:GetChildren()
         ) do
 
-            local name = mat.Name
+            local name =
+                material.Name
 
             if not ignoredMaterials[name] then
-                ignoredMaterials[name] = false
+                ignoredMaterials[name] =
+                    false
             end
 
             table.insert(
                 materialList,
                 name
             )
-
         end
-
     end
-
 end)
 
-table.sort(materialList)
+table.sort(
+    materialList
+)
 
 --==============================================================
--- LOOKED AT PART
+-- LOOK PART
 --==============================================================
 
 local function getMiningLookPart()
 
+    if not Camera then
+        return nil
+    end
+
     local viewport =
-        MiningCamera.ViewportSize
+        Camera.ViewportSize
 
     local ray =
-        MiningCamera:ViewportPointToRay(
+        Camera:ViewportPointToRay(
             viewport.X / 2,
             viewport.Y / 2
         )
@@ -2323,9 +2820,11 @@ local function getMiningLookPart()
         LocalPlayer.Character
 
     if character then
-        params.FilterDescendantsInstances = {
-            character
-        }
+
+        params.FilterDescendantsInstances =
+            {
+                character
+            }
     end
 
     local result =
@@ -2343,44 +2842,44 @@ local function getMiningLookPart()
 end
 
 --==============================================================
--- IGNORE CHECK
+-- MATERIAL CHECK
 --==============================================================
 
 local function isMaterialIgnored(part)
 
-    if not part then
+    if not part
+        or not part:IsA("BasePart") then
+
         return false
     end
 
-    if not part:IsA("BasePart") then
-        return false
-    end
-
-    local materialVariant =
+    local variant =
         part.MaterialVariant
 
-    if not materialVariant
-        or materialVariant == "" then
+    if not variant
+        or variant == "" then
 
         return false
     end
 
     return ignoredMaterials[
-        materialVariant
+        variant
     ] == true
 end
 
 --==============================================================
--- HOOK
+-- FAST BREAK
 --==============================================================
 
 local function enableFastBreak()
 
     if fastBreakHooked then
-        return
+        return true
     end
 
-    if typeof(hookfunction) ~= "function" then
+    if typeof(hookfunction) ~=
+        "function" then
+
         return false
     end
 
@@ -2394,11 +2893,11 @@ local function enableFastBreak()
                     .Libs
                     .GetBreakingTime
             )
-
         end)
 
     if not ok
-        or typeof(getBreakingTime) ~= "function" then
+        or typeof(getBreakingTime) ~=
+        "function" then
 
         return false
     end
@@ -2406,36 +2905,44 @@ local function enableFastBreak()
     local original =
         getBreakingTime
 
+    local oldFunction
+
+    local success =
+        pcall(function()
+
+            oldFunction =
+                hookfunction(
+                    original,
+
+                    function(...)
+
+                        local part =
+                            getMiningLookPart()
+
+                        if isMaterialIgnored(
+                            part
+                        ) then
+
+                            return original(...)
+                        end
+
+                        return State.BreakSpeed
+                    end
+                )
+        end)
+
+    if not success then
+        return false
+    end
+
     fastBreakOldFunction =
-        hookfunction(
-            original,
+        oldFunction
 
-            function(...)
-
-                local part =
-                    getMiningLookPart()
-
-                -- Игнорируемый материал:
-                -- оставляем оригинальное поведение игры.
-                if isMaterialIgnored(part) then
-
-                    return original(...)
-
-                end
-
-                -- Fast Break
-                return State.BreakSpeed
-            end
-        )
-
-    fastBreakHooked = true
+    fastBreakHooked =
+        true
 
     return true
 end
-
---==============================================================
--- DISABLE / RESTORE
---==============================================================
 
 local function disableFastBreak()
 
@@ -2443,42 +2950,1106 @@ local function disableFastBreak()
         return
     end
 
-    if typeof(hookfunction) ~= "function" then
+    if typeof(hookfunction) ~=
+        "function" then
+
         return
     end
 
-    if fastBreakOldFunction then
+    pcall(function()
 
-        pcall(function()
+        local getBreakingTime =
+            require(
+                ReplicatedStorage
+                    .Systems
+                    .ItemsSystem
+                    .Libs
+                    .GetBreakingTime
+            )
 
-            local getBreakingTime =
-                require(
-                    ReplicatedStorage
-                        .Systems
-                        .ItemsSystem
-                        .Libs
-                        .GetBreakingTime
-                )
+        if fastBreakOldFunction then
 
             hookfunction(
                 getBreakingTime,
                 fastBreakOldFunction
             )
+        end
+    end)
 
-        end)
+    fastBreakOldFunction =
+        nil
 
+    fastBreakHooked =
+        false
+end
+
+--==============================================================
+-- CROSSHAIR
+--==============================================================
+
+local CrosshairState = {
+
+    Enabled = true,
+
+    Size = 32,
+
+    ImageID = "",
+
+    CursorName = "",
+
+    SavedCursors = {}
+}
+
+local CURSOR_FOLDER =
+    "aesthetic"
+
+local CURSOR_FILE =
+    "aesthetic/cursors.json"
+
+--==============================================================
+-- FILESYSTEM
+--==============================================================
+
+local function hasFS()
+
+    return type(isfile) == "function"
+        and type(readfile) == "function"
+        and type(writefile) == "function"
+        and type(isfolder) == "function"
+        and type(makefolder) == "function"
+end
+
+--==============================================================
+-- CURSOR LOAD
+--==============================================================
+
+local function loadCursors()
+
+    CrosshairState.SavedCursors =
+        {}
+
+    if not hasFS() then
+        return
     end
 
-    fastBreakOldFunction = nil
-    fastBreakHooked = false
+    pcall(function()
+
+        if not isfolder(
+            CURSOR_FOLDER
+        ) then
+
+            makefolder(
+                CURSOR_FOLDER
+            )
+        end
+
+        if not isfile(
+            CURSOR_FILE
+        ) then
+
+            writefile(
+                CURSOR_FILE,
+                "{}"
+            )
+
+            return
+        end
+
+        local raw =
+            readfile(
+                CURSOR_FILE
+            )
+
+        if raw == "" then
+            return
+        end
+
+        local data =
+            HttpService:JSONDecode(
+                raw
+            )
+
+        if type(data) ==
+            "table" then
+
+            CrosshairState.SavedCursors =
+                data
+        end
+    end)
 end
+
+local function saveCursors()
+
+    if not hasFS() then
+        return false
+    end
+
+    return pcall(function()
+
+        if not isfolder(
+            CURSOR_FOLDER
+        ) then
+
+            makefolder(
+                CURSOR_FOLDER
+            )
+        end
+
+        writefile(
+            CURSOR_FILE,
+            HttpService:JSONEncode(
+                CrosshairState.SavedCursors
+            )
+        )
+    end)
+end
+
+loadCursors()
+
+--==============================================================
+-- CROSSHAIR OBJECT
+--==============================================================
+
+local function getImageObj()
+
+    local pg =
+        LocalPlayer:FindFirstChild(
+            "PlayerGui"
+        )
+
+    if not pg then
+        return nil
+    end
+
+    local camGui =
+        pg:FindFirstChild(
+            "CameraGui"
+        )
+
+    if not camGui then
+        return nil
+    end
+
+    local crosshair =
+        camGui:FindFirstChild(
+            "Crosshair"
+        )
+
+    if not crosshair then
+        return nil
+    end
+
+    if crosshair:IsA(
+        "ImageLabel"
+    )
+    or crosshair:IsA(
+        "ImageButton"
+    ) then
+
+        return crosshair
+    end
+
+    return crosshair:
+        FindFirstChildWhichIsA(
+            "ImageLabel",
+            true
+        )
+        or crosshair:
+        FindFirstChildWhichIsA(
+            "ImageButton",
+            true
+        )
+end
+
+--==============================================================
+-- CROSSHAIR APPLY
+--==============================================================
+
+local function applyCrosshairImage(id)
+
+    local obj =
+        getImageObj()
+
+    if not obj then
+        return false
+    end
+
+    id =
+        tostring(
+            id or ""
+        ):match(
+            "^%s*(.-)%s*$"
+        )
+
+    if id == "" then
+        return false
+    end
+
+    if id:match(
+        "^rbxassetid://"
+    ) then
+
+        obj.Image =
+            id
+
+    else
+
+        obj.Image =
+            "rbxassetid://"
+            .. id
+    end
+
+    return true
+end
+
+local function applyCrosshairSize(size)
+
+    local obj =
+        getImageObj()
+
+    CrosshairState.Size =
+        math.clamp(
+            tonumber(size) or 32,
+            8,
+            200
+        )
+
+    if not obj then
+        return
+    end
+
+    local camGui =
+        PlayerGui:FindFirstChild(
+            "CameraGui"
+        )
+
+    local crosshair =
+        camGui
+        and camGui:FindFirstChild(
+            "Crosshair"
+        )
+
+    local scale =
+        crosshair
+        and crosshair:
+        FindFirstChildWhichIsA(
+            "UIScale",
+            true
+        )
+
+    if scale then
+
+        scale.Scale =
+            CrosshairState.Size
+            / 32
+
+    else
+
+        obj.Size =
+            UDim2.fromOffset(
+                CrosshairState.Size,
+                CrosshairState.Size
+            )
+    end
+end
+
+local function applyCrosshairVisible(value)
+
+    CrosshairState.Enabled =
+        value == true
+
+    local obj =
+        getImageObj()
+
+    if obj then
+        obj.Visible =
+            CrosshairState.Enabled
+    end
+end
+
+local function getCursorNames()
+
+    local names = {}
+
+    for name, data in pairs(
+        CrosshairState.SavedCursors
+    ) do
+
+        if type(data) == "table"
+            and data.id then
+
+            table.insert(
+                names,
+                name
+            )
+        end
+    end
+
+    table.sort(names)
+
+    return names
+end
+
+--==============================================================
+-- CONFIG
+--==============================================================
+
+local CONFIG_FOLDER =
+    "aesthetic"
+
+local SelectedConfig =
+    nil
+
+local function getConfigNames()
+
+    local names = {}
+
+    if not hasFS() then
+        return names
+    end
+
+    pcall(function()
+
+        if not isfolder(
+            CONFIG_FOLDER
+        ) then
+
+            makefolder(
+                CONFIG_FOLDER
+            )
+        end
+
+        -- Read manifest
+
+        local manifestPath =
+            CONFIG_FOLDER
+            .. "/manifest.json"
+
+        if isfile(
+            manifestPath
+        ) then
+
+            local raw =
+                readfile(
+                    manifestPath
+                )
+
+            if raw ~= "" then
+
+                local data =
+                    HttpService:JSONDecode(
+                        raw
+                    )
+
+                if type(data) ==
+                    "table" then
+
+                    for _, name in ipairs(
+                        data
+                    ) do
+
+                        if type(name) ==
+                            "string"
+                            and name ~= "" then
+
+                            table.insert(
+                                names,
+                                name
+                            )
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    table.sort(names)
+
+    return names
+end
+
+local function saveManifest(list)
+
+    if not hasFS() then
+        return false
+    end
+
+    return pcall(function()
+
+        if not isfolder(
+            CONFIG_FOLDER
+        ) then
+
+            makefolder(
+                CONFIG_FOLDER
+            )
+        end
+
+        writefile(
+            CONFIG_FOLDER
+            .. "/manifest.json",
+
+            HttpService:JSONEncode(
+                list
+            )
+        )
+    end)
+end
+
+--==============================================================
+-- STATE SNAPSHOT
+--==============================================================
+
+local function buildStateSnapshot()
+
+    return {
+
+        ESPEnabled =
+            State.ESPEnabled,
+
+        ESPColor = {
+            State.ESPColor.R,
+            State.ESPColor.G,
+            State.ESPColor.B
+        },
+
+        FOVEnabled =
+            State.FOVEnabled,
+
+        FOVSize =
+            State.FOVSize,
+
+        FOVRainbow =
+            State.FOVRainbow,
+
+        FOVColor = {
+            State.FOVColor.R,
+            State.FOVColor.G,
+            State.FOVColor.B
+        },
+
+        KillAura =
+            State.KillAura,
+
+        KillAuraRange =
+            State.KillAuraRange,
+
+        AttackDelay =
+            State.AttackDelay,
+
+        AimbotEnabled =
+            State.AimbotEnabled,
+
+        NoFallDamage =
+            State.NoFallDamage,
+
+        NoDrowDamage =
+            State.NoDrowDamage,
+
+        FlyEnabled =
+            State.FlyEnabled,
+
+        FlySpeed =
+            State.FlySpeed,
+
+        Speed =
+            State.Speed,
+
+        JumpPower =
+            State.JumpPower,
+
+        FastBreak =
+            State.FastBreak,
+
+        BreakSpeed =
+            State.BreakSpeed,
+
+        IgnoreMaterials =
+            State.IgnoreMaterials
+    }
+end
+
+--==============================================================
+-- APPLY SNAPSHOT
+--==============================================================
+
+local function applySnapshot(snap)
+
+    if type(snap) ~= "table" then
+        return false
+    end
+
+    State.ESPEnabled =
+        snap.ESPEnabled == true
+
+    State.FOVEnabled =
+        snap.FOVEnabled == true
+
+    State.FOVSize =
+        math.clamp(
+            tonumber(
+                snap.FOVSize
+            ) or 120,
+            20,
+            600
+        )
+
+    State.FOVRainbow =
+        snap.FOVRainbow == true
+
+    if type(
+        snap.ESPColor
+    ) == "table" then
+
+        State.ESPColor =
+            Color3.new(
+                tonumber(
+                    snap.ESPColor[1]
+                ) or 1,
+
+                tonumber(
+                    snap.ESPColor[2]
+                ) or 0,
+
+                tonumber(
+                    snap.ESPColor[3]
+                ) or 0
+            )
+    end
+
+    if type(
+        snap.FOVColor
+    ) == "table" then
+
+        State.FOVColor =
+            Color3.new(
+                tonumber(
+                    snap.FOVColor[1]
+                ) or 1,
+
+                tonumber(
+                    snap.FOVColor[2]
+                ) or 1,
+
+                tonumber(
+                    snap.FOVColor[3]
+                ) or 1
+            )
+    end
+
+    State.KillAura =
+        snap.KillAura == true
+
+    State.KillAuraRange =
+        math.clamp(
+            tonumber(
+                snap.KillAuraRange
+            ) or 24,
+            4,
+            60
+        )
+
+    State.AttackDelay =
+        math.max(
+            tonumber(
+                snap.AttackDelay
+            ) or 0.35,
+            0.01
+        )
+
+    State.AimbotEnabled =
+        snap.AimbotEnabled == true
+
+    State.NoFallDamage =
+        snap.NoFallDamage == true
+
+    State.NoDrowDamage =
+        snap.NoDrowDamage == true
+
+    State.FlyEnabled =
+        snap.FlyEnabled == true
+
+    State.FlySpeed =
+        math.clamp(
+            tonumber(
+                snap.FlySpeed
+            ) or 16,
+            1,
+            200
+        )
+
+    State.Speed =
+        math.clamp(
+            tonumber(
+                snap.Speed
+            ) or 16,
+            1,
+            200
+        )
+
+    State.JumpPower =
+        math.clamp(
+            tonumber(
+                snap.JumpPower
+            ) or 50,
+            1,
+            500
+        )
+
+    State.FastBreak =
+        snap.FastBreak == true
+
+    State.BreakSpeed =
+        math.max(
+            tonumber(
+                snap.BreakSpeed
+            ) or 0,
+            0
+        )
+
+    -- Ignore materials
+
+    table.clear(
+        State.IgnoreMaterials
+    )
+
+    if type(
+        snap.IgnoreMaterials
+    ) == "table" then
+
+        for name, enabled in pairs(
+            snap.IgnoreMaterials
+        ) do
+
+            if type(name) == "string" then
+
+                State.IgnoreMaterials[name] =
+                    enabled == true
+            end
+        end
+    end
+
+    -- Apply
+
+    applyCharacterStats()
+
+    if State.FastBreak then
+        enableFastBreak()
+    else
+        disableFastBreak()
+    end
+
+    if State.FlyEnabled then
+        enableFly()
+    else
+        disableFly()
+    end
+
+    return true
+end
+
+--==============================================================
+-- VISUALS TAB
+--==============================================================
+
+TabVisuals:CreateSection(
+    "ESP / FOV"
+)
+
+TabVisuals:CreateToggle({
+
+    Name = "ESP",
+
+    CurrentValue =
+        State.ESPEnabled,
+
+    Flag = "ESP",
+
+    Callback = function(value)
+
+        State.ESPEnabled =
+            value
+    end
+})
+
+TabVisuals:CreateColorPicker({
+
+    Name = "ESP Color",
+
+    Color =
+        State.ESPColor,
+
+    Flag = "ESPColor",
+
+    Callback = function(color)
+
+        State.ESPColor =
+            color
+
+        for _, esp in pairs(
+            ESPObjects
+        ) do
+
+            if esp.BoxStroke then
+                esp.BoxStroke.Color =
+                    color
+            end
+
+            if esp.ScreenStroke then
+                esp.ScreenStroke.Color =
+                    color
+            end
+        end
+    end
+})
+
+TabVisuals:CreateToggle({
+
+    Name = "FOV Circle",
+
+    CurrentValue =
+        State.FOVEnabled,
+
+    Flag = "FOVEnabled",
+
+    Callback = function(value)
+
+        State.FOVEnabled =
+            value
+    end
+})
+
+TabVisuals:CreateToggle({
+
+    Name = "FOV Rainbow",
+
+    CurrentValue =
+        State.FOVRainbow,
+
+    Flag = "FOVRainbow",
+
+    Callback = function(value)
+
+        State.FOVRainbow =
+            value
+    end
+})
+
+TabVisuals:CreateColorPicker({
+
+    Name = "FOV Color",
+
+    Color =
+        State.FOVColor,
+
+    Flag = "FOVColor",
+
+    Callback = function(color)
+
+        State.FOVColor =
+            color
+
+        FOVStroke.Color =
+            color
+    end
+})
+
+TabVisuals:CreateSlider({
+
+    Name = "FOV Size",
+
+    Range = {
+        20,
+        600
+    },
+
+    Increment = 1,
+
+    Suffix = " px",
+
+    CurrentValue =
+        State.FOVSize,
+
+    Flag = "FOVSize",
+
+    Callback = function(value)
+
+        State.FOVSize =
+            value
+    end
+})
+
+--==============================================================
+-- RAGE TAB
+--==============================================================
+
+TabRage:CreateSection(
+    "Combat"
+)
+
+TabRage:CreateToggle({
+
+    Name = "Kill Aura",
+
+    CurrentValue =
+        State.KillAura,
+
+    Flag = "KillAura",
+
+    Callback = function(value)
+
+        State.KillAura =
+            value
+    end
+})
+
+TabRage:CreateToggle({
+
+    Name = "Jump Attack",
+
+    CurrentValue =
+        State.JumpAttack,
+
+    Flag = "JumpAttack",
+
+    Callback = function(value)
+
+        State.JumpAttack =
+            value
+    end
+})
+
+TabRage:CreateSlider({
+
+    Name = "Kill Aura Range",
+
+    Range = {
+        4,
+        60
+    },
+
+    Increment = 1,
+
+    Suffix = " studs",
+
+    CurrentValue =
+        State.KillAuraRange,
+
+    Flag = "KillAuraRange",
+
+    Callback = function(value)
+
+        State.KillAuraRange =
+            value
+    end
+})
+
+TabRage:CreateSlider({
+
+    Name = "Attack Delay",
+
+    Range = {
+        5,
+        200
+    },
+
+    Increment = 1,
+
+    Suffix = " ms",
+
+    CurrentValue =
+        State.AttackDelay * 1000,
+
+    Flag = "AttackDelay",
+
+    Callback = function(value)
+
+        State.AttackDelay =
+            math.max(
+                value / 1000,
+                0.01
+            )
+    end
+})
+
+TabRage:CreateToggle({
+
+    Name = "Aimbot",
+
+    CurrentValue =
+        State.AimbotEnabled,
+
+    Flag = "Aimbot",
+
+    Callback = function(value)
+
+        State.AimbotEnabled =
+            value
+    end
+})
+
+--==============================================================
+-- MISC TAB
+--==============================================================
+
+TabMisc:CreateSection(
+    "Movement"
+)
+
+TabMisc:CreateToggle({
+
+    Name = "No Fall Damage",
+
+    CurrentValue =
+        State.NoFallDamage,
+
+    Flag = "NoFallDamage",
+
+    Callback = function(value)
+
+        State.NoFallDamage =
+            value
+    end
+})
+
+TabMisc:CreateToggle({
+
+    Name = "No Drown Damage",
+
+    CurrentValue =
+        State.NoDrowDamage,
+
+    Flag = "NoDrowDamage",
+
+    Callback = function(value)
+
+        State.NoDrowDamage =
+            value
+    end
+})
+
+TabMisc:CreateToggle({
+
+    Name =
+        "Fly [W/A/S/D + Space/Ctrl + Mobile]",
+
+    CurrentValue =
+        State.FlyEnabled,
+
+    Flag = "Fly",
+
+    Callback = function(value)
+
+        State.FlyEnabled =
+            value
+
+        if value then
+
+            if not enableFly() then
+
+                State.FlyEnabled =
+                    false
+
+                Rayfield:Notify({
+
+                    Title =
+                        "Fly",
+
+                    Content =
+                        "Character not ready.",
+
+                    Duration = 3
+                })
+            end
+
+        else
+
+            disableFly()
+        end
+    end
+})
+
+TabMisc:CreateSlider({
+
+    Name = "Fly Speed",
+
+    Range = {
+        1,
+        200
+    },
+
+    Increment = 1,
+
+    Suffix = "",
+
+    CurrentValue =
+        State.FlySpeed,
+
+    Flag = "FlySpeed",
+
+    Callback = function(value)
+
+        State.FlySpeed =
+            value
+    end
+})
+
+TabMisc:CreateSlider({
+
+    Name = "Jump Power",
+
+    Range = {
+        1,
+        500
+    },
+
+    Increment = 1,
+
+    CurrentValue =
+        State.JumpPower,
+
+    Flag = "JumpPower",
+
+    Callback = function(value)
+
+        State.JumpPower =
+            value
+
+        applyCharacterStats()
+    end
+})
+
+TabMisc:CreateSlider({
+
+    Name = "Speed",
+
+    Range = {
+        1,
+        200
+    },
+
+    Increment = 1,
+
+    CurrentValue =
+        State.Speed,
+
+    Flag = "Speed",
+
+    Callback = function(value)
+
+        State.Speed =
+            value
+
+        applyCharacterStats()
+    end
+})
 
 --==============================================================
 -- MINING TAB
 --==============================================================
 
 TabMining:CreateSection(
-    "⛏️ | Fast Break"
+    "Fast Break"
 )
 
 TabMining:CreateToggle({
@@ -2502,23 +4073,25 @@ TabMining:CreateToggle({
 
             if not success then
 
-                State.FastBreak = false
+                State.FastBreak =
+                    false
 
                 Rayfield:Notify({
-                    Title = "Fast Break",
+
+                    Title =
+                        "Fast Break",
+
                     Content =
-                        "GetBreakingTime / hookfunction is unavailable.",
+                        "GetBreakingTime or hookfunction is unavailable.",
+
                     Duration = 3
                 })
-
             end
 
         else
 
             disableFastBreak()
-
         end
-
     end
 })
 
@@ -2530,11 +4103,15 @@ TabMining:CreateInput({
         "0 = instant",
 
     CurrentValue =
-        tostring(State.BreakSpeed),
+        tostring(
+            State.BreakSpeed
+        ),
 
-    RemoveTextAfterFocusLost = false,
+    RemoveTextAfterFocusLost =
+        false,
 
-    Flag = "InputBreakSpeed",
+    Flag =
+        "InputBreakSpeed",
 
     Callback = function(text)
 
@@ -2544,10 +4121,11 @@ TabMining:CreateInput({
         if value ~= nil then
 
             State.BreakSpeed =
-                math.max(0, value)
-
+                math.max(
+                    value,
+                    0
+                )
         end
-
     end
 })
 
@@ -2556,7 +4134,7 @@ TabMining:CreateInput({
 --==============================================================
 
 TabMining:CreateSection(
-    "🧱 | Ignore Materials"
+    "Ignore Materials"
 )
 
 local IgnoreMaterialDropdown
@@ -2570,12 +4148,12 @@ local function getIgnoredMaterialNames()
     ) do
 
         if enabled then
+
             table.insert(
                 result,
                 name
             )
         end
-
     end
 
     table.sort(result)
@@ -2583,46 +4161,35 @@ local function getIgnoredMaterialNames()
     return result
 end
 
-local function refreshIgnoreDropdown()
-
-    if IgnoreMaterialDropdown then
-
-        IgnoreMaterialDropdown:Refresh(
-            materialList
-        )
-
-    end
-
-end
-
 IgnoreMaterialDropdown =
     TabMining:CreateDropdown({
 
-        Name = "Materials",
+        Name =
+            "Materials",
 
         Options =
             materialList,
 
         CurrentOption = {},
 
-        MultipleOptions = true,
+        MultipleOptions =
+            true,
 
-        Flag = "IgnoredMaterials",
+        Flag =
+            "IgnoredMaterials",
 
         Callback = function(options)
 
-            -- Сначала всё выключаем
             for _, name in ipairs(
                 materialList
             ) do
 
                 ignoredMaterials[name] =
                     false
-
             end
 
-            -- Затем включаем выбранные
-            if type(options) == "table" then
+            if type(options) ==
+                "table" then
 
                 for _, name in ipairs(
                     options
@@ -2630,17 +4197,15 @@ IgnoreMaterialDropdown =
 
                     ignoredMaterials[name] =
                         true
-
                 end
-
             end
-
         end
     })
 
 TabMining:CreateButton({
 
-    Name = "Clear Ignore List",
+    Name =
+        "Clear Ignore List",
 
     Callback = function()
 
@@ -2650,852 +4215,992 @@ TabMining:CreateButton({
 
             ignoredMaterials[name] =
                 false
-
         end
 
         if IgnoreMaterialDropdown then
 
-            IgnoreMaterialDropdown:Set(
-                {}
-            )
+            pcall(function()
 
+                IgnoreMaterialDropdown:Set(
+                    {}
+                )
+
+            end)
         end
 
         Rayfield:Notify({
-            Title = "Mining",
-            Content = "Ignore list cleared.",
+
+            Title =
+                "Mining",
+
+            Content =
+                "Ignore list cleared.",
+
             Duration = 2
         })
-
     end
 })
 
 TabMining:CreateParagraph({
 
-    Title = "Ignore Materials",
+    Title =
+        "Ignore Materials",
 
     Content =
-        "Selected materials use the game's original breaking time instead of Fast Break."
-
-})
---==============================================================
--- CROSSHAIR SYSTEM
---==============================================================
-
-local CrosshairState = {
-    Enabled    = true,
-    Size       = 32,
-    ImageID    = "",
-    CursorName = "",
-    SavedCursors = {},
-}
-
-local CURSOR_FOLDER = "aesthetic"
-local CURSOR_FILE   = "aesthetic/cursors.json"
-
-local function hasFS()
-    return type(isfile) == "function"
-        and type(readfile) == "function"
-        and type(writefile) == "function"
-        and type(isfolder) == "function"
-        and type(makefolder) == "function"
-end
-
-local function loadCursors()
-    CrosshairState.SavedCursors = {}
-    if not hasFS() then return end
-    pcall(function()
-        if not isfolder(CURSOR_FOLDER) then makefolder(CURSOR_FOLDER) end
-        if not isfile(CURSOR_FILE) then
-            writefile(CURSOR_FILE, "{}")
-            return
-        end
-        local raw = readfile(CURSOR_FILE)
-        if raw == "" then return end
-        local data = HttpService:JSONDecode(raw)
-        if type(data) == "table" then
-            CrosshairState.SavedCursors = data
-        end
-    end)
-end
-
-local function saveCursors()
-    if not hasFS() then return false end
-    return pcall(function()
-        if not isfolder(CURSOR_FOLDER) then makefolder(CURSOR_FOLDER) end
-        writefile(CURSOR_FILE, HttpService:JSONEncode(CrosshairState.SavedCursors))
-    end)
-end
-
-loadCursors()
-
-local function getImageObj()
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    if not pg then return nil end
-    local camGui = pg:FindFirstChild("CameraGui")
-    if not camGui then return nil end
-    local crosshair = camGui:FindFirstChild("Crosshair")
-    if not crosshair then return nil end
-
-    if crosshair:IsA("ImageLabel") or crosshair:IsA("ImageButton") then
-        return crosshair
-    end
-    return crosshair:FindFirstChildWhichIsA("ImageLabel", true)
-        or crosshair:FindFirstChildWhichIsA("ImageButton", true)
-end
-
-local function applyCrosshairImage(id)
-    local obj = getImageObj()
-    if not obj then return false end
-    id = tostring(id or ""):match("^%s*(.-)%s*$")
-    if id == "" then return false end
-    obj.Image = id:match("^rbxassetid://") and id or ("rbxassetid://" .. id)
-    return true
-end
-
-local function applyCrosshairSize(sz)
-    local obj = getImageObj()
-    if not obj then return end
-    CrosshairState.Size = sz
-    local camGui   = LocalPlayer.PlayerGui:FindFirstChild("CameraGui")
-    local crosshair = camGui and camGui:FindFirstChild("Crosshair")
-    local scale = crosshair and crosshair:FindFirstChildWhichIsA("UIScale", true)
-    if scale then
-        scale.Scale = sz / 32
-    else
-        obj.Size = UDim2.fromOffset(sz, sz)
-    end
-end
-
-local function applyCrosshairVisible(v)
-    local obj = getImageObj()
-    CrosshairState.Enabled = v
-    if obj then obj.Visible = v end
-end
-
-local function getCursorNames()
-    local names = {}
-    for name, data in pairs(CrosshairState.SavedCursors) do
-        if type(data) == "table" and data.id then
-            table.insert(names, name)
-        end
-    end
-    table.sort(names)
-    return names
-end
-
---==============================================================
--- CONFIG SYSTEM
---==============================================================
-
---==============================================================
--- CONFIG SYSTEM
---==============================================================
-
-local CONFIG_FOLDER = "aesthetic"
-local SelectedConfig = nil
-
-local function getConfigNames()
-
-    local names = {}
-
-    if not hasFS() then
-        return names
-    end
-
-    pcall(function()
-
-        if not isfolder(CONFIG_FOLDER) then
-            makefolder(CONFIG_FOLDER)
-        end
-
-        local manifestPath =
-            CONFIG_FOLDER .. "/manifest.json"
-
-        if not isfile(manifestPath) then
-            return
-        end
-
-        local raw =
-            readfile(manifestPath)
-
-        if raw == "" then
-            return
-        end
-
-        local data =
-            HttpService:JSONDecode(raw)
-
-        if type(data) == "table" then
-            names = data
-        end
-
-    end)
-
-    return names
-end
-
-
-local function saveManifest(list)
-
-    if not hasFS() then
-        return false
-    end
-
-    return pcall(function()
-
-        if not isfolder(CONFIG_FOLDER) then
-            makefolder(CONFIG_FOLDER)
-        end
-
-        writefile(
-            CONFIG_FOLDER .. "/manifest.json",
-            HttpService:JSONEncode(list)
-        )
-
-    end)
-end
-
-
---==============================================================
--- STATE SNAPSHOT
---==============================================================
-
-local function buildStateSnapshot()
-
-    local color = State.ESPColor
-
-    return {
-
-        -- Visuals
-        ESPEnabled =
-            State.ESPEnabled,
-
-        ESPColor = {
-            color.R,
-            color.G,
-            color.B
-        },
-
-        FOVEnabled =
-            State.FOVEnabled,
-
-        FOVSize =
-            State.FOVSize,
-
-        FOVRainbow =
-            State.FOVRainbow,
-
-        FOVColor = {
-            State.FOVColor.R,
-            State.FOVColor.G,
-            State.FOVColor.B
-        },
-
-        -- Rage
-        KillAura =
-            State.KillAura,
-
-        KillAuraRange =
-            State.KillAuraRange,
-
-        AttackDelay =
-            State.AttackDelay,
-
-        AimbotEnabled =
-            State.AimbotEnabled,
-
-        -- Misc
-        NoFallDamage =
-            State.NoFallDamage,
-
-        NoDrowDamage =
-            State.NoDrowDamage,
-
-        FlyEnabled =
-            State.FlyEnabled,
-
-        Speed =
-            State.Speed,
-
-        JumpPower =
-            State.JumpPower,
-
-        -- Mining
-        FastBreak =
-            State.FastBreak,
-
-        BreakSpeed =
-            State.BreakSpeed,
-
-        IgnoreMaterials =
-            State.IgnoreMaterials,
-    }
-end
-
-
---==============================================================
--- APPLY SNAPSHOT
---==============================================================
-
-local function applySnapshot(snap)
-
-    if type(snap) ~= "table" then
-        return
-    end
-
-    --==========================================================
-    -- VISUALS
-    --==========================================================
-
-    State.ESPEnabled =
-        snap.ESPEnabled == true
-
-    State.FOVEnabled =
-        snap.FOVEnabled == true
-
-    State.FOVSize =
-        tonumber(snap.FOVSize) or 120
-
-    State.FOVRainbow =
-        snap.FOVRainbow == true
-
-
-    if type(snap.ESPColor) == "table"
-        and snap.ESPColor[1]
-        and snap.ESPColor[2]
-        and snap.ESPColor[3] then
-
-        State.ESPColor =
-            Color3.new(
-                tonumber(snap.ESPColor[1]) or 1,
-                tonumber(snap.ESPColor[2]) or 1,
-                tonumber(snap.ESPColor[3]) or 1
-            )
-
-    end
-
-
-    if type(snap.FOVColor) == "table"
-        and snap.FOVColor[1]
-        and snap.FOVColor[2]
-        and snap.FOVColor[3] then
-
-        State.FOVColor =
-            Color3.new(
-                tonumber(snap.FOVColor[1]) or 1,
-                tonumber(snap.FOVColor[2]) or 1,
-                tonumber(snap.FOVColor[3]) or 1
-            )
-
-    end
-
-
-    --==========================================================
-    -- RAGE
-    --==========================================================
-
-    State.KillAura =
-        snap.KillAura == true
-
-    State.KillAuraRange =
-        tonumber(snap.KillAuraRange) or 24
-
-    State.AttackDelay =
-        tonumber(snap.AttackDelay) or 0.35
-
-    State.AimbotEnabled =
-        snap.AimbotEnabled == true
-
-
-    --==========================================================
-    -- MISC
-    --==========================================================
-
-    State.NoFallDamage =
-        snap.NoFallDamage == true
-
-    State.NoDrowDamage =
-        snap.NoDrowDamage == true
-
-    State.FlyEnabled =
-        snap.FlyEnabled == true
-
-    State.Speed =
-        tonumber(snap.Speed) or 16
-
-    State.JumpPower =
-        tonumber(snap.JumpPower) or 50
-
-
-    --==========================================================
-    -- MINING
-    --==========================================================
-
-    State.FastBreak =
-        snap.FastBreak == true
-
-    State.BreakSpeed =
-        tonumber(snap.BreakSpeed) or 0
-
-
-    --==========================================================
-    -- IGNORE MATERIALS
-    --==========================================================
-
-    for name in pairs(State.IgnoreMaterials) do
-        State.IgnoreMaterials[name] = nil
-    end
-
-    if type(snap.IgnoreMaterials) == "table" then
-
-        for name, enabled in pairs(
-            snap.IgnoreMaterials
-        ) do
-
-            State.IgnoreMaterials[name] =
-                enabled == true
-
-        end
-    end
-
-
-    --==========================================================
-    -- APPLY CHARACTER
-    --==========================================================
-
-    applyCharacterStats()
-
-
-    --==========================================================
-    -- FAST BREAK
-    --==========================================================
-
-    if State.FastBreak then
-        enableFastBreak()
-    else
-        disableFastBreak()
-    end
-
-
-    --==========================================================
-    -- FLY
-    --==========================================================
-
-    if State.FlyEnabled then
-        enableFly()
-    else
-        disableFly()
-    end
-
-end
---==============================================================
--- TAB: VISUALS
---==============================================================
-
-TabVisuals:CreateToggle({
-    Name         = "ESP",
-    CurrentValue = false,
-    Flag         = "ESP",
-    Callback     = function(v) State.ESPEnabled = v end
-})
-
-TabVisuals:CreateColorPicker({
-    Name         = "ESP Color",
-    Color        = State.ESPColor,
-    Flag         = "ESPColor",
-    Callback     = function(c) State.ESPColor = c end
-})
-
-TabVisuals:CreateToggle({
-    Name         = "FOV Circle",
-    CurrentValue = false,
-    Flag         = "FOVEnabled",
-    Callback     = function(v) State.FOVEnabled = v end
-})
-
-TabVisuals:CreateToggle({
-    Name         = "FOV Rainbow",
-    CurrentValue = false,
-    Flag         = "FOVRainbow",
-    Callback     = function(v) State.FOVRainbow = v end
-})
-
-TabVisuals:CreateColorPicker({
-    Name         = "FOV Color",
-    Color        = State.FOVColor,
-    Flag         = "FOVColor",
-    Callback     = function(c)
-        State.FOVColor = c
-        FOVCircle.Color = c
-    end
-})
-
-TabVisuals:CreateSlider({
-    Name         = "FOV Size",
-    Range        = { 20, 600 },
-    Increment    = 1,
-    Suffix       = " px",
-    CurrentValue = 120,
-    Flag         = "FOVSize",
-    Callback     = function(v) State.FOVSize = v end
+        "Selected materials use the original game breaking time instead of Fast Break."
 })
 
 --==============================================================
--- TAB: RAGE
---==============================================================
-
-TabRage:CreateToggle({
-    Name         = "Kill Aura",
-    CurrentValue = false,
-    Flag         = "KillAura",
-    Callback     = function(v) State.KillAura = v end
-})
-
-TabRage:CreateSlider({
-    Name         = "Kill Aura Range",
-    Range        = { 4, 60 },
-    Increment    = 1,
-    Suffix       = " studs",
-    CurrentValue = 24,
-    Flag         = "KillAuraRange",
-    Callback     = function(v) State.KillAuraRange = v end
-})
-
-TabRage:CreateSlider({
-    Name         = "Attack Delay",
-    Range        = { 5, 200 },
-    Increment    = 1,
-    Suffix       = " ms",
-    CurrentValue = 35,
-    Flag         = "AttackDelay",
-    Callback     = function(v) State.AttackDelay = v / 100 end
-})
-
-TabRage:CreateToggle({
-    Name         = "Aimbot",
-    CurrentValue = false,
-    Flag         = "Aimbot",
-    Callback     = function(v) State.AimbotEnabled = v end
-})
-
---==============================================================
--- TAB: MISC
---==============================================================
-
-TabMisc:CreateToggle({
-    Name         = "No Fall Damage",
-    CurrentValue = false,
-    Flag         = "NoFallDamage",
-    Callback     = function(v) State.NoFallDamage = v end
-})
-
-TabMisc:CreateToggle({
-    Name         = "No Drown Damage",
-    CurrentValue = false,
-    Flag         = "NoDrowDamage",
-    Callback     = function(v) State.NoDrowDamage = v end
-})
-
-TabMisc:CreateToggle({
-    Name         = "Fly  [W/A/S/D + Space/Ctrl or mobile]",
-    CurrentValue = false,
-    Flag         = "Fly",
-    Callback     = function(v)
-        State.FlyEnabled = v
-        if v then
-            enableFly()
-        else
-            disableFly()
-        end
-    end
-})
-
-TabMisc:CreateSlider({
-    Name         = "Jump Power",
-    Range        = { 1, 500 },
-    Increment    = 1,
-    Suffix       = "",
-    CurrentValue = 50,
-    Flag         = "JumpPower",
-    Callback     = function(v)
-        State.JumpPower = v
-        applyCharacterStats()
-    end
-})
-
-TabMisc:CreateSlider({
-    Name         = "Speed",
-    Range        = { 1, 200 },
-    Increment    = 1,
-    Suffix       = "",
-    CurrentValue = 16,
-    Flag         = "Speed",
-    Callback     = function(v)
-        State.Speed = v
-        applyCharacterStats()
-    end
-})
-
---==============================================================
--- TAB: CROSSHAIR
+-- CROSSHAIR TAB
 --==============================================================
 
 TabCrosshair:CreateToggle({
-    Name         = "Enable Crosshair",
-    CurrentValue = true,
-    Flag         = "CrosshairEnabled",
-    Callback     = function(v) applyCrosshairVisible(v) end
+
+    Name =
+        "Enable Crosshair",
+
+    CurrentValue =
+        CrosshairState.Enabled,
+
+    Flag =
+        "CrosshairEnabled",
+
+    Callback = function(value)
+
+        applyCrosshairVisible(
+            value
+        )
+    end
 })
 
 TabCrosshair:CreateInput({
-    Name                    = "Cursor Asset ID",
-    PlaceholderText         = "1234567890",
-    RemoveTextAfterFocusLost = false,
-    Callback                = function(t) CrosshairState.ImageID = t end
+
+    Name =
+        "Cursor Asset ID",
+
+    PlaceholderText =
+        "1234567890",
+
+    RemoveTextAfterFocusLost =
+        false,
+
+    Callback = function(text)
+
+        CrosshairState.ImageID =
+            text
+    end
 })
 
 TabCrosshair:CreateSlider({
-    Name         = "Cursor Size",
-    Range        = { 8, 200 },
-    Increment    = 1,
-    Suffix       = " px",
-    CurrentValue = 32,
-    Flag         = "CrosshairSize",
-    Callback     = function(v) applyCrosshairSize(v) end
-})
 
-TabCrosshair:CreateButton({
-    Name     = "Apply Cursor",
-    Callback = function()
-        if CrosshairState.ImageID == "" then
-            Rayfield:Notify({ Title = "Crosshair", Content = "Enter an Asset ID first.", Duration = 3 })
-            return
-        end
-        local ok = applyCrosshairImage(CrosshairState.ImageID)
-        if not ok then
-            Rayfield:Notify({ Title = "Crosshair", Content = "ImageLabel not found in CameraGui.", Duration = 3 })
-            return
-        end
-        applyCrosshairSize(CrosshairState.Size)
-        applyCrosshairVisible(CrosshairState.Enabled)
-        Rayfield:Notify({ Title = "Crosshair", Content = "Cursor applied.", Duration = 2 })
+    Name =
+        "Cursor Size",
+
+    Range = {
+        8,
+        200
+    },
+
+    Increment = 1,
+
+    Suffix = " px",
+
+    CurrentValue =
+        CrosshairState.Size,
+
+    Flag =
+        "CrosshairSize",
+
+    Callback = function(value)
+
+        applyCrosshairSize(
+            value
+        )
     end
 })
 
 TabCrosshair:CreateButton({
-    Name     = "Reset Size",
+
+    Name =
+        "Apply Cursor",
+
     Callback = function()
-        applyCrosshairSize(32)
-        Rayfield:Notify({ Title = "Crosshair", Content = "Size reset to 32 px.", Duration = 2 })
+
+        if CrosshairState.ImageID
+            :match(
+                "^%s*$"
+            ) then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "Enter an Asset ID first.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        local success =
+            applyCrosshairImage(
+                CrosshairState.ImageID
+            )
+
+        if not success then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "CameraGui/Crosshair was not found.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        applyCrosshairSize(
+            CrosshairState.Size
+        )
+
+        applyCrosshairVisible(
+            CrosshairState.Enabled
+        )
+
+        Rayfield:Notify({
+
+            Title =
+                "Crosshair",
+
+            Content =
+                "Cursor applied.",
+
+            Duration = 2
+        })
+    end
+})
+
+TabCrosshair:CreateButton({
+
+    Name =
+        "Reset Size",
+
+    Callback = function()
+
+        applyCrosshairSize(
+            32
+        )
+
+        Rayfield:Notify({
+
+            Title =
+                "Crosshair",
+
+            Content =
+                "Size reset to 32 px.",
+
+            Duration = 2
+        })
     end
 })
 
 TabCrosshair:CreateDivider()
 
 TabCrosshair:CreateInput({
-    Name                    = "Cursor Name (for saving)",
-    PlaceholderText         = "e.g. Minecraft",
-    RemoveTextAfterFocusLost = false,
-    Callback                = function(t) CrosshairState.CursorName = t end
-})
 
-TabCrosshair:CreateButton({
-    Name     = "Save Cursor",
-    Callback = function()
-        local name = CrosshairState.CursorName:match("^%s*(.-)%s*$")
-        local id   = CrosshairState.ImageID:match("^%s*(.-)%s*$")
-        if name == "" then
-            Rayfield:Notify({ Title = "Crosshair", Content = "Enter a cursor name.", Duration = 3 })
-            return
-        end
-        if id == "" then
-            Rayfield:Notify({ Title = "Crosshair", Content = "Enter an Asset ID.", Duration = 3 })
-            return
-        end
-        CrosshairState.SavedCursors[name] = {
-            id      = id,
-            size    = CrosshairState.Size,
-            enabled = CrosshairState.Enabled,
-        }
-        saveCursors()
-        Rayfield:Notify({ Title = "Cursor Saved", Content = name, Duration = 2 })
+    Name =
+        "Cursor Name",
+
+    PlaceholderText =
+        "Minecraft",
+
+    RemoveTextAfterFocusLost =
+        false,
+
+    Callback = function(text)
+
+        CrosshairState.CursorName =
+            text
     end
 })
 
-local SelectedCursor = nil
+TabCrosshair:CreateButton({
+
+    Name =
+        "Save Cursor",
+
+    Callback = function()
+
+        local name =
+            CrosshairState.CursorName:
+            match(
+                "^%s*(.-)%s*$"
+            )
+
+        local id =
+            CrosshairState.ImageID:
+            match(
+                "^%s*(.-)%s*$"
+            )
+
+        if name == "" then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "Enter cursor name.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        if id == "" then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "Enter Asset ID.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        CrosshairState.SavedCursors[name] = {
+
+            id =
+                id,
+
+            size =
+                CrosshairState.Size,
+
+            enabled =
+                CrosshairState.Enabled
+        }
+
+        local success =
+            saveCursors()
+
+        if not success then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "File system unavailable.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        Rayfield:Notify({
+
+            Title =
+                "Cursor Saved",
+
+            Content =
+                name,
+
+            Duration = 2
+        })
+    end
+})
+
+local SelectedCursor
 local CursorDropdown
 
-CursorDropdown = TabCrosshair:CreateDropdown({
-    Name            = "Saved Cursors",
-    Options         = getCursorNames(),
-    CurrentOption   = {},
-    MultipleOptions = false,
-    Callback        = function(opts)
-        local name = opts and opts[1]
-        if not name then return end
-        SelectedCursor = name
-        local data = CrosshairState.SavedCursors[name]
-        if not data then return end
-        CrosshairState.ImageID  = tostring(data.id or "")
-        CrosshairState.Size     = tonumber(data.size) or 32
-        CrosshairState.Enabled  = data.enabled ~= false
-        applyCrosshairImage(CrosshairState.ImageID)
-        applyCrosshairSize(CrosshairState.Size)
-        applyCrosshairVisible(CrosshairState.Enabled)
-        Rayfield:Notify({ Title = "Cursor Loaded", Content = name, Duration = 2 })
-    end
-})
+CursorDropdown =
+    TabCrosshair:CreateDropdown({
+
+        Name =
+            "Saved Cursors",
+
+        Options =
+            getCursorNames(),
+
+        CurrentOption = {},
+
+        MultipleOptions =
+            false,
+
+        Callback = function(options)
+
+            local name =
+                options
+                and options[1]
+
+            if not name then
+                return
+            end
+
+            SelectedCursor =
+                name
+
+            local data =
+                CrosshairState
+                .SavedCursors[name]
+
+            if not data then
+                return
+            end
+
+            CrosshairState.ImageID =
+                tostring(
+                    data.id or ""
+                )
+
+            CrosshairState.Size =
+                tonumber(
+                    data.size
+                ) or 32
+
+            CrosshairState.Enabled =
+                data.enabled ~= false
+
+            applyCrosshairImage(
+                CrosshairState.ImageID
+            )
+
+            applyCrosshairSize(
+                CrosshairState.Size
+            )
+
+            applyCrosshairVisible(
+                CrosshairState.Enabled
+            )
+
+            Rayfield:Notify({
+
+                Title =
+                    "Cursor Loaded",
+
+                Content =
+                    name,
+
+                Duration = 2
+            })
+        end
+    })
 
 TabCrosshair:CreateButton({
-    Name     = "Delete Selected Cursor",
+
+    Name =
+        "Delete Selected Cursor",
+
     Callback = function()
+
         if not SelectedCursor then
-            Rayfield:Notify({ Title = "Crosshair", Content = "Select a cursor first.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Crosshair",
+
+                Content =
+                    "Select a cursor first.",
+
+                Duration = 3
+            })
+
             return
         end
-        CrosshairState.SavedCursors[SelectedCursor] = nil
+
+        local previous =
+            SelectedCursor
+
+        CrosshairState
+            .SavedCursors[
+                previous
+            ] =
+            nil
+
         saveCursors()
-        local prev = SelectedCursor
-        SelectedCursor = nil
+
+        SelectedCursor =
+            nil
+
         if CursorDropdown then
-            CursorDropdown:Refresh(getCursorNames())
+
+            pcall(function()
+
+                CursorDropdown:Refresh(
+                    getCursorNames()
+                )
+
+            end)
         end
-        Rayfield:Notify({ Title = "Cursor Deleted", Content = prev, Duration = 2 })
+
+        Rayfield:Notify({
+
+            Title =
+                "Cursor Deleted",
+
+            Content =
+                previous,
+
+            Duration = 2
+        })
     end
 })
 
 --==============================================================
--- TAB: CONFIG
+-- CONFIG TAB
 --==============================================================
 
 local ConfigDropdown
-local configNames = getConfigNames()
 local ConfigNameInput = ""
 
+local configNames =
+    getConfigNames()
+
 local function refreshConfigDropdown()
-    configNames = getConfigNames()
+
+    configNames =
+        getConfigNames()
+
     if ConfigDropdown then
-        ConfigDropdown:Refresh(configNames)
+
+        pcall(function()
+
+            ConfigDropdown:Refresh(
+                configNames
+            )
+
+        end)
     end
 end
 
-ConfigDropdown = TabConfig:CreateDropdown({
-    Name            = "Select Config",
-    Options         = configNames,
-    CurrentOption   = {},
-    MultipleOptions = false,
-    Callback        = function(opts)
-        SelectedConfig = opts and opts[1]
-    end
-})
+ConfigDropdown =
+    TabConfig:CreateDropdown({
+
+        Name =
+            "Select Config",
+
+        Options =
+            configNames,
+
+        CurrentOption = {},
+
+        MultipleOptions =
+            false,
+
+        Callback = function(options)
+
+            SelectedConfig =
+                options
+                and options[1]
+        end
+    })
 
 TabConfig:CreateInput({
-    Name                    = "Config Name",
-    PlaceholderText         = "e.g. my_rage_config",
-    RemoveTextAfterFocusLost = false,
-    Callback                = function(t) ConfigNameInput = t end
+
+    Name =
+        "Config Name",
+
+    PlaceholderText =
+        "my_config",
+
+    RemoveTextAfterFocusLost =
+        false,
+
+    Callback = function(text)
+
+        ConfigNameInput =
+            text
+    end
 })
 
+--==============================================================
+-- CONFIG CREATE
+--==============================================================
+
 TabConfig:CreateButton({
-    Name     = "Create Config",
+
+    Name =
+        "Create Config",
+
     Callback = function()
-        local name = ConfigNameInput:match("^%s*(.-)%s*$")
+
+        local name =
+            ConfigNameInput:
+            match(
+                "^%s*(.-)%s*$"
+            )
+
         if name == "" then
-            Rayfield:Notify({ Title = "Config", Content = "Enter a config name.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Enter a config name.",
+
+                Duration = 3
+            })
+
             return
         end
+
         if not hasFS() then
-            Rayfield:Notify({ Title = "Config", Content = "File system not available.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "File system unavailable.",
+
+                Duration = 3
+            })
+
             return
         end
-        if not isfolder(CONFIG_FOLDER) then makefolder(CONFIG_FOLDER) end
-        local path = CONFIG_FOLDER .. "/" .. name .. ".json"
-        writefile(path, HttpService:JSONEncode(buildStateSnapshot()))
-        local list = getConfigNames()
-        table.insert(list, name)
-        saveManifest(list)
+
+        if not isfolder(
+            CONFIG_FOLDER
+        ) then
+
+            makefolder(
+                CONFIG_FOLDER
+            )
+        end
+
+        local path =
+            CONFIG_FOLDER
+            .. "/"
+            .. name
+            .. ".json"
+
+        local success =
+            pcall(function()
+
+                writefile(
+                    path,
+
+                    HttpService:JSONEncode(
+                        buildStateSnapshot()
+                    )
+                )
+
+                local list =
+                    getConfigNames()
+
+                local exists =
+                    false
+
+                for _, existing in ipairs(
+                    list
+                ) do
+
+                    if existing == name then
+
+                        exists =
+                            true
+
+                        break
+                    end
+                end
+
+                if not exists then
+
+                    table.insert(
+                        list,
+                        name
+                    )
+                end
+
+                saveManifest(
+                    list
+                )
+            end)
+
+        if not success then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Failed to create config.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        SelectedConfig =
+            name
+
         refreshConfigDropdown()
-        Rayfield:Notify({ Title = "Config Created", Content = name, Duration = 2 })
+
+        Rayfield:Notify({
+
+            Title =
+                "Config Created",
+
+            Content =
+                name,
+
+            Duration = 2
+        })
     end
 })
 
+--==============================================================
+-- CONFIG LOAD
+--==============================================================
+
 TabConfig:CreateButton({
-    Name     = "Load Selected Config",
+
+    Name =
+        "Load Selected Config",
+
     Callback = function()
+
         if not SelectedConfig then
-            Rayfield:Notify({ Title = "Config", Content = "Select a config first.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Select a config first.",
+
+                Duration = 3
+            })
+
             return
         end
-        if not hasFS() then return end
-        local path = CONFIG_FOLDER .. "/" .. SelectedConfig .. ".json"
+
+        if not hasFS() then
+            return
+        end
+
+        local path =
+            CONFIG_FOLDER
+            .. "/"
+            .. SelectedConfig
+            .. ".json"
+
         if not isfile(path) then
-            Rayfield:Notify({ Title = "Config", Content = "File not found.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "File not found.",
+
+                Duration = 3
+            })
+
             return
         end
-        local snap = HttpService:JSONDecode(readfile(path))
-        applySnapshot(snap)
-        Rayfield:Notify({ Title = "Config Loaded", Content = SelectedConfig, Duration = 2 })
+
+        local success, snap =
+            pcall(function()
+
+                return HttpService:JSONDecode(
+                    readfile(path)
+                )
+            end)
+
+        if not success then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Invalid JSON.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        if not applySnapshot(
+            snap
+        ) then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Failed to apply config.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        Rayfield:Notify({
+
+            Title =
+                "Config Loaded",
+
+            Content =
+                SelectedConfig,
+
+            Duration = 2
+        })
     end
 })
 
+--==============================================================
+-- CONFIG SAVE
+--==============================================================
+
 TabConfig:CreateButton({
-    Name     = "Delete Selected Config",
+
+    Name =
+        "Save Selected Config",
+
     Callback = function()
+
         if not SelectedConfig then
-            Rayfield:Notify({ Title = "Config", Content = "Select a config first.", Duration = 3 })
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Select a config first.",
+
+                Duration = 3
+            })
+
             return
         end
-        if not hasFS() then return end
-        local path = CONFIG_FOLDER .. "/" .. SelectedConfig .. ".json"
-        if isfile(path) then
-            delfile(path)
+
+        if not hasFS() then
+            return
         end
-        local list = getConfigNames()
-        for i, v in ipairs(list) do
-            if v == SelectedConfig then
-                table.remove(list, i)
+
+        local path =
+            CONFIG_FOLDER
+            .. "/"
+            .. SelectedConfig
+            .. ".json"
+
+        local success =
+            pcall(function()
+
+                writefile(
+                    path,
+
+                    HttpService:JSONEncode(
+                        buildStateSnapshot()
+                    )
+                )
+            end)
+
+        if success then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config Saved",
+
+                Content =
+                    SelectedConfig,
+
+                Duration = 2
+            })
+
+        else
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Failed to save config.",
+
+                Duration = 3
+            })
+        end
+    end
+})
+
+--==============================================================
+-- CONFIG DELETE
+--==============================================================
+
+TabConfig:CreateButton({
+
+    Name =
+        "Delete Selected Config",
+
+    Callback = function()
+
+        if not SelectedConfig then
+
+            Rayfield:Notify({
+
+                Title =
+                    "Config",
+
+                Content =
+                    "Select a config first.",
+
+                Duration = 3
+            })
+
+            return
+        end
+
+        if not hasFS() then
+            return
+        end
+
+        local selected =
+            SelectedConfig
+
+        local path =
+            CONFIG_FOLDER
+            .. "/"
+            .. selected
+            .. ".json"
+
+        pcall(function()
+
+            if isfile(path) then
+                delfile(path)
+            end
+        end)
+
+        local list =
+            getConfigNames()
+
+        for i, name in ipairs(
+            list
+        ) do
+
+            if name == selected then
+
+                table.remove(
+                    list,
+                    i
+                )
+
                 break
             end
         end
-        saveManifest(list)
-        local prev = SelectedConfig
-        SelectedConfig = nil
+
+        saveManifest(
+            list
+        )
+
+        SelectedConfig =
+            nil
+
         refreshConfigDropdown()
-        Rayfield:Notify({ Title = "Config Deleted", Content = prev, Duration = 2 })
+
+        Rayfield:Notify({
+
+            Title =
+                "Config Deleted",
+
+            Content =
+                selected,
+
+            Duration = 2
+        })
     end
 })
 
 --==============================================================
--- TAB: ABOUT
+-- ABOUT
 --==============================================================
 
 TabAbout:CreateParagraph({
-    Title   = "aesthetic",
+
+    Title =
+        "aesthetic",
+
     Content =
-        "Version: 1.1.0\n" ..
-        "publix script.\n" ..
-        "Shit code"
+        "Version: 1.1.1\n" ..
+        "Hybrid ESP / FOV / Combat / Mining / Crosshair / Config"
 })
 
 TabAbout:CreateParagraph({
-    Title   = "Discord Server",
-    Content = "discord.gg/SZbHupR7W"
+
+    Title =
+        "Discord",
+
+    Content =
+        "discord.gg/SZbHupR7W"
 })
 
 TabAbout:CreateParagraph({
-    Title   = "nope",
-    Content = "aesthetic."
+
+    Title =
+        "Status",
+
+    Content =
+        "Loaded successfully."
 })
+
+--==============================================================
+-- INITIAL APPLY
+--==============================================================
+
+applyCharacterStats()
+
+applyCrosshairVisible(
+    CrosshairState.Enabled
+)
 
 --==============================================================
 -- READY
 --==============================================================
 
 Rayfield:Notify({
-    Title    = "aesthetic",
-    Content  = "v1.1.0 — loaded clean.",
+
+    Title =
+        "aesthetic",
+
+    Content =
+        "v1.1.0 — loaded clean.",
+
     Duration = 3
 })
 
-print("[aesthetic] loaded — v1.1.0")
+print(
+    "[aesthetic] loaded — v1.1.1"
+)
